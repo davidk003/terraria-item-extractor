@@ -1,0 +1,260 @@
+<#
+.SYNOPSIS
+    Builds and runs the Terraria data extractor, then optionally validates the output.
+
+.DESCRIPTION
+    Automates the build, extraction, and (optionally) validation steps described in
+    extract-mod/docs/EXTRACTION_GUIDE.md. Each stage prints a clear banner so you can
+    follow progress. Exits non-zero on build failure or extraction failure.
+
+.PARAMETER TerrariaExe
+    Required. Full path to Terraria.exe.
+    Example: "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe"
+
+.PARAMETER OutputDir
+    Optional. Directory where JSON and CSV output files are written.
+    Default: extract-mod/StandaloneExtractor/Output (relative to the repo root).
+
+.PARAMETER Validate
+    Switch. When set, runs the Python validator after extraction and exits non-zero
+    if validation reports FAIL.
+
+.PARAMETER ValidationJsonOut
+    Optional. Path for the machine-readable validation report (JSON).
+    Default: extract-mod/validation/validation-report.json
+
+.PARAMETER ValidationMdOut
+    Optional. Path for the human-readable validation report (Markdown).
+    Default: extract-mod/validation/validation-report.md
+
+.EXAMPLE
+    Basic run:
+    .\extract-mod\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe"
+
+.EXAMPLE
+    Custom output directory:
+    .\extract-mod\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe" -OutputDir "C:\MyData\terraria"
+
+.EXAMPLE
+    With validation:
+    .\extract-mod\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe" -Validate
+
+.NOTES
+    Exit codes:
+      0 - All phases passed (and validation passed, if -Validate was used)
+      1 - Build failed, extraction failed, or validation reported FAIL
+#>
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$TerrariaExe,
+
+    [Parameter(Mandatory = $false)]
+    [string]$OutputDir = "",
+
+    [Parameter(Mandatory = $false)]
+    [switch]$Validate,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ValidationJsonOut = "",
+
+    [Parameter(Mandatory = $false)]
+    [string]$ValidationMdOut = ""
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+# ---------------------------------------------------------------------------
+# Resolve paths relative to the repository root (the directory that contains
+# extract-mod/). This makes the script work whether you run it from the repo
+# root or from the extract-mod/scripts folder.
+# ---------------------------------------------------------------------------
+
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Walk up from the script directory to find the repo root (the folder that
+# contains extract-mod/).
+function Find-RepoRoot {
+    param([string]$StartDir)
+    $current = $StartDir
+    while ($current -ne "") {
+        if (Test-Path (Join-Path $current "extract-mod")) {
+            return $current
+        }
+        $parent = Split-Path -Parent $current
+        if ($parent -eq $current) { break }
+        $current = $parent
+    }
+    return $null
+}
+
+$RepoRoot = Find-RepoRoot -StartDir $ScriptDir
+if (-not $RepoRoot) {
+    Write-Error "Could not locate repo root (the folder containing extract-mod/). Run this script from inside the repository."
+    exit 1
+}
+
+$ProjectFile = Join-Path $RepoRoot "extract-mod\StandaloneExtractor\StandaloneExtractor.csproj"
+$ValidationScript = Join-Path $RepoRoot "extract-mod\validation\run_validation.py"
+
+if ($OutputDir -eq "") {
+    $OutputDir = Join-Path $RepoRoot "extract-mod\StandaloneExtractor\Output"
+}
+
+if ($ValidationJsonOut -eq "") {
+    $ValidationJsonOut = Join-Path $RepoRoot "extract-mod\validation\validation-report.json"
+}
+
+if ($ValidationMdOut -eq "") {
+    $ValidationMdOut = Join-Path $RepoRoot "extract-mod\validation\validation-report.md"
+}
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+function Write-Banner {
+    param([string]$Message)
+    $line = "=" * 50
+    Write-Host ""
+    Write-Host $line
+    Write-Host "  $Message"
+    Write-Host $line
+    Write-Host ""
+}
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ">> $Message"
+}
+
+# ---------------------------------------------------------------------------
+# Pre-flight checks
+# ---------------------------------------------------------------------------
+
+Write-Banner "Terraria Data Extractor"
+
+Write-Step "Checking Terraria.exe..."
+if (-not (Test-Path $TerrariaExe)) {
+    Write-Error "Terraria.exe not found at: $TerrariaExe`nPass the correct path with -TerrariaExe."
+    exit 1
+}
+Write-Host "   Found: $TerrariaExe"
+
+Write-Step "Checking project file..."
+if (-not (Test-Path $ProjectFile)) {
+    Write-Error "Project file not found: $ProjectFile`nMake sure you are running this from inside the repository."
+    exit 1
+}
+Write-Host "   Found: $ProjectFile"
+
+# ---------------------------------------------------------------------------
+# Stage 1: Build
+# ---------------------------------------------------------------------------
+
+Write-Banner "Stage 1 of 3: Build"
+
+Write-Step "Running: dotnet build"
+dotnet build "$ProjectFile"
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Build failed (exit code $LASTEXITCODE). Fix build errors before running extraction."
+    exit 1
+}
+
+Write-Host ""
+Write-Host "Build succeeded."
+
+# ---------------------------------------------------------------------------
+# Stage 2: Extract
+# ---------------------------------------------------------------------------
+
+Write-Banner "Stage 2 of 3: Extract"
+
+Write-Step "Output directory: $OutputDir"
+Write-Step "Running extractor..."
+
+dotnet run --project "$ProjectFile" -- `
+    --terraria "$TerrariaExe" `
+    --output "$OutputDir"
+
+$ExtractionExitCode = $LASTEXITCODE
+if ($ExtractionExitCode -ne 0) {
+    Write-Error "Extraction finished with exit code $ExtractionExitCode. One or more phases failed."
+    Write-Host ""
+    Write-Host "Check the phase logs for details:"
+    Write-Host "  $OutputDir\_runtime\phase-results\"
+    Write-Host ""
+    Write-Host "See extract-mod/docs/EXTRACTION_GUIDE.md section 7 (Troubleshooting) for help."
+    exit 1
+}
+
+Write-Host ""
+Write-Host "Extraction complete. Output files are in: $OutputDir"
+
+# ---------------------------------------------------------------------------
+# Stage 3 (optional): Validate
+# ---------------------------------------------------------------------------
+
+if (-not $Validate) {
+    Write-Banner "Done"
+    Write-Host "All phases passed."
+    Write-Host ""
+    Write-Host "To validate the output, re-run with -Validate, or run manually:"
+    Write-Host "  python extract-mod/validation/run_validation.py \`"
+    Write-Host "    --output-dir `"$OutputDir`" \`"
+    Write-Host "    --json-out `"$ValidationJsonOut`" \`"
+    Write-Host "    --md-out `"$ValidationMdOut`""
+    Write-Host ""
+    exit 0
+}
+
+Write-Banner "Stage 3 of 3: Validate"
+
+Write-Step "Checking Python..."
+$PythonCmd = $null
+foreach ($candidate in @("python", "python3", "py")) {
+    try {
+        $version = & $candidate --version 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $PythonCmd = $candidate
+            Write-Host "   Using: $candidate ($version)"
+            break
+        }
+    } catch {
+        # not found, try next
+    }
+}
+
+if (-not $PythonCmd) {
+    Write-Error "Python not found. Install Python 3.x and make sure it is on your PATH."
+    exit 1
+}
+
+Write-Step "Running validation..."
+
+& $PythonCmd "$ValidationScript" `
+    --output-dir "$OutputDir" `
+    --json-out "$ValidationJsonOut" `
+    --md-out "$ValidationMdOut"
+
+$ValidationExitCode = $LASTEXITCODE
+
+Write-Host ""
+if ($ValidationExitCode -eq 0) {
+    Write-Banner "Done - PASS"
+    Write-Host "Validation passed."
+    Write-Host "Reports written to:"
+    Write-Host "  $ValidationJsonOut"
+    Write-Host "  $ValidationMdOut"
+    Write-Host ""
+    exit 0
+} else {
+    Write-Error "Validation reported FAIL (exit code $ValidationExitCode)."
+    Write-Host ""
+    Write-Host "Review the report for details:"
+    Write-Host "  $ValidationMdOut"
+    Write-Host ""
+    exit 1
+}

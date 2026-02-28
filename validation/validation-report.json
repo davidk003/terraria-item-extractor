@@ -1,0 +1,144 @@
+{
+  "validator": "D2 - Validation Contract Alignment Agent",
+  "status": "PASS",
+  "outputDirectory": "extract-mod/StandaloneExtractor/Output-final",
+  "counts": {
+    "items": 5455,
+    "recipes": 2940,
+    "shimmer": 4471,
+    "npc_shops": 25,
+    "shimmerTypeBreakdown": {
+      "item_transform": 244,
+      "deconstruct": 4227
+    }
+  },
+  "checks": {
+    "required_files": {
+      "pass": true,
+      "details": [
+        {
+          "file": "items.json",
+          "exists": true
+        },
+        {
+          "file": "items.csv",
+          "exists": true
+        },
+        {
+          "file": "recipes.json",
+          "exists": true
+        },
+        {
+          "file": "recipes.csv",
+          "exists": true
+        },
+        {
+          "file": "shimmer.json",
+          "exists": true
+        },
+        {
+          "file": "shimmer.csv",
+          "exists": true
+        },
+        {
+          "file": "npc_shops.json",
+          "exists": true
+        },
+        {
+          "file": "npc_shops.csv",
+          "exists": true
+        }
+      ],
+      "failingRecords": []
+    },
+    "count_ranges": {
+      "pass": true,
+      "details": [
+        {
+          "check": "items_range",
+          "expected": "5300-5600",
+          "actual": 5455,
+          "pass": true
+        },
+        {
+          "check": "recipes_range",
+          "expected": "2800-3100",
+          "actual": 2940,
+          "pass": true
+        },
+        {
+          "check": "shimmer_item_transform_range",
+          "expected": "200-350",
+          "actual": 244,
+          "pass": true
+        },
+        {
+          "check": "shimmer_deconstruct_range",
+          "expected": "3800-4600",
+          "actual": 4227,
+          "pass": true
+        },
+        {
+          "check": "npc_shops_min",
+          "expected": ">=25",
+          "actual": 25,
+          "pass": true
+        }
+      ],
+      "failingRecords": []
+    },
+    "foreign_key_integrity": {
+      "pass": true,
+      "details": {
+        "checkedDatasets": [
+          "recipes",
+          "shimmer",
+          "npc_shops"
+        ],
+        "validItemIdCount": 5455,
+        "invalidReferenceCount": 0
+      },
+      "failingRecords": []
+    },
+    "spot_checks": {
+      "pass": true,
+      "details": [
+        {
+          "check": "torch_recipe_exists",
+          "pass": true,
+          "evidence": {
+            "RecipeIndex": 0,
+            "ResultItemId": 8,
+            "IngredientItemIds": [
+              9,
+              23
+            ]
+          },
+          "failingRecords": []
+        },
+        {
+          "check": "merchant_sells_torch",
+          "pass": true,
+          "evidence": {
+            "NpcId": 17,
+            "ShopName": "Shop 1",
+            "ItemId": 8,
+            "BuyPrice": 50
+          },
+          "failingRecords": []
+        },
+        {
+          "check": "known_shimmer_transform",
+          "pass": true,
+          "evidence": {
+            "InputItemId": 8,
+            "OutputItemId": 5353,
+            "Type": "item_transform"
+          },
+          "failingRecords": []
+        }
+      ],
+      "failingRecords": []
+    }
+  }
+}

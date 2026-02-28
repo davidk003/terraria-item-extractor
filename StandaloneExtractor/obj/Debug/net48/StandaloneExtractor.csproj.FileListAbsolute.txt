@@ -1,0 +1,11 @@
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\bin\Debug\net48\StandaloneExtractor.exe.config
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\bin\Debug\net48\StandaloneExtractor.exe
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\bin\Debug\net48\StandaloneExtractor.pdb
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\obj\Debug\net48\StandaloneExtractor.csproj.AssemblyReference.cache
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\obj\Debug\net48\StandaloneExtractor.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\obj\Debug\net48\StandaloneExtractor.AssemblyInfoInputs.cache
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\obj\Debug\net48\StandaloneExtractor.AssemblyInfo.cs
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\obj\Debug\net48\StandaloneExtractor.csproj.CoreCompileInputs.cache
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\obj\Debug\net48\StandaloneExtractor.sourcelink.json
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\obj\Debug\net48\StandaloneExtractor.exe
+C:\Users\David Kim\.local\share\opencode\worktree\2544cd551fdb50e07ccde0b614bc86f0fc0f6f01\jolly-eagle\extract-mod\StandaloneExtractor\obj\Debug\net48\StandaloneExtractor.pdb
