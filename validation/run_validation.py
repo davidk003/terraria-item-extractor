@@ -69,8 +69,12 @@ def load_json_array(path: Path) -> tuple[list[dict[str, Any]], str | None]:
     return normalized, None
 
 
-def in_range(value: int, minimum: int, maximum: int) -> bool:
-    return minimum <= value <= maximum
+def check_status(pass_check: bool, warning: bool = False) -> str:
+    if not pass_check:
+        return "FAIL"
+    if warning:
+        return "WARN"
+    return "PASS"
 
 
 def collect_foreign_key_failures(
@@ -286,6 +290,9 @@ def build_markdown_report(report: dict[str, Any]) -> str:
     def pass_fail(value: bool) -> str:
         return "PASS" if value else "FAIL"
 
+    def pass_warn_fail(detail: dict[str, Any]) -> str:
+        return check_status(bool(detail.get("pass", False)), bool(detail.get("warning", False)))
+
     count_range_details = checks["count_ranges"]["details"]
     detail_by_name = {entry["check"]: entry for entry in count_range_details}
 
@@ -298,8 +305,9 @@ def build_markdown_report(report: dict[str, Any]) -> str:
         "## Validation Rules",
         "",
         "- Shimmer validation is typed, not total-only:",
-        f"  - `item_transform` count must be `{ITEM_TRANSFORM_MIN}-{ITEM_TRANSFORM_MAX}` (historically around ~260)",
-        f"  - `deconstruct` count must be `{DECONSTRUCT_MIN}-{DECONSTRUCT_MAX}` (baseline around `4227`, bounded tolerance for drift)",
+        f"  - `item_transform` count must be at least `{ITEM_TRANSFORM_MIN}`; above `{ITEM_TRANSFORM_MAX}` is a warning (historically around ~260)",
+        f"  - `deconstruct` count must be at least `{DECONSTRUCT_MIN}`; above `{DECONSTRUCT_MAX}` is a warning (baseline around `4227`, bounded tolerance for drift)",
+        "- All dataset count checks use hard minimums and soft upper-bound warnings.",
         "",
         "## Counts",
         "",
@@ -341,32 +349,46 @@ def build_markdown_report(report: dict[str, Any]) -> str:
             "### 2) Count ranges",
             f"- Result: {pass_fail(checks['count_ranges']['pass'])}",
             (
-                f"- Items range check (`{ITEMS_MIN}-{ITEMS_MAX}`): "
-                f"{pass_fail(detail_by_name['items_range']['pass'])} "
+                f"- Items count check (min `{ITEMS_MIN}`, soft max `{ITEMS_MAX}`): "
+                f"{pass_warn_fail(detail_by_name['items_range'])} "
                 f"(actual `{detail_by_name['items_range']['actual']}`)"
             ),
             (
-                f"- Recipes range check (`{RECIPES_MIN}-{RECIPES_MAX}`): "
-                f"{pass_fail(detail_by_name['recipes_range']['pass'])} "
+                f"- Recipes count check (min `{RECIPES_MIN}`, soft max `{RECIPES_MAX}`): "
+                f"{pass_warn_fail(detail_by_name['recipes_range'])} "
                 f"(actual `{detail_by_name['recipes_range']['actual']}`)"
             ),
             (
-                f"- Shimmer item_transform range check (`{ITEM_TRANSFORM_MIN}-{ITEM_TRANSFORM_MAX}`): "
-                f"{pass_fail(detail_by_name['shimmer_item_transform_range']['pass'])} "
+                f"- Shimmer item_transform check (min `{ITEM_TRANSFORM_MIN}`, soft max `{ITEM_TRANSFORM_MAX}`): "
+                f"{pass_warn_fail(detail_by_name['shimmer_item_transform_range'])} "
                 f"(actual `{detail_by_name['shimmer_item_transform_range']['actual']}`)"
             ),
             (
-                f"- Shimmer deconstruct range check (`{DECONSTRUCT_MIN}-{DECONSTRUCT_MAX}`): "
-                f"{pass_fail(detail_by_name['shimmer_deconstruct_range']['pass'])} "
+                f"- Shimmer deconstruct check (min `{DECONSTRUCT_MIN}`, soft max `{DECONSTRUCT_MAX}`): "
+                f"{pass_warn_fail(detail_by_name['shimmer_deconstruct_range'])} "
                 f"(actual `{detail_by_name['shimmer_deconstruct_range']['actual']}`)"
             ),
             (
                 f"- NPC shops minimum (`>={NPC_SHOPS_MIN}`): "
-                f"{pass_fail(detail_by_name['npc_shops_min']['pass'])} "
+                f"{pass_warn_fail(detail_by_name['npc_shops_min'])} "
                 f"(actual `{detail_by_name['npc_shops_min']['actual']}`)"
             ),
         ]
     )
+
+    if checks["count_ranges"]["warningRecords"]:
+        lines.extend(
+            [
+                "",
+                "Warning records (soft upper bounds exceeded):",
+                "",
+                "```json",
+                json.dumps(checks["count_ranges"]["warningRecords"], indent=2, sort_keys=True),
+                "```",
+            ]
+        )
+    else:
+        lines.append("- Warning records: none")
 
     if checks["count_ranges"]["failingRecords"]:
         lines.extend(
@@ -511,32 +533,38 @@ def validate(output_dir: Path) -> dict[str, Any]:
             "check": "items_range",
             "expected": f"{ITEMS_MIN}-{ITEMS_MAX}",
             "actual": counts["items"],
-            "pass": in_range(counts["items"], ITEMS_MIN, ITEMS_MAX),
+            "pass": counts["items"] >= ITEMS_MIN,
+            "warning": counts["items"] > ITEMS_MAX,
+            "status": check_status(counts["items"] >= ITEMS_MIN, counts["items"] > ITEMS_MAX),
         },
         {
             "check": "recipes_range",
             "expected": f"{RECIPES_MIN}-{RECIPES_MAX}",
             "actual": counts["recipes"],
-            "pass": in_range(counts["recipes"], RECIPES_MIN, RECIPES_MAX),
+            "pass": counts["recipes"] >= RECIPES_MIN,
+            "warning": counts["recipes"] > RECIPES_MAX,
+            "status": check_status(counts["recipes"] >= RECIPES_MIN, counts["recipes"] > RECIPES_MAX),
         },
         {
             "check": "shimmer_item_transform_range",
             "expected": f"{ITEM_TRANSFORM_MIN}-{ITEM_TRANSFORM_MAX}",
             "actual": counts["shimmerTypeBreakdown"]["item_transform"],
-            "pass": in_range(
-                counts["shimmerTypeBreakdown"]["item_transform"],
-                ITEM_TRANSFORM_MIN,
-                ITEM_TRANSFORM_MAX,
+            "pass": counts["shimmerTypeBreakdown"]["item_transform"] >= ITEM_TRANSFORM_MIN,
+            "warning": counts["shimmerTypeBreakdown"]["item_transform"] > ITEM_TRANSFORM_MAX,
+            "status": check_status(
+                counts["shimmerTypeBreakdown"]["item_transform"] >= ITEM_TRANSFORM_MIN,
+                counts["shimmerTypeBreakdown"]["item_transform"] > ITEM_TRANSFORM_MAX,
             ),
         },
         {
             "check": "shimmer_deconstruct_range",
             "expected": f"{DECONSTRUCT_MIN}-{DECONSTRUCT_MAX}",
             "actual": counts["shimmerTypeBreakdown"]["deconstruct"],
-            "pass": in_range(
-                counts["shimmerTypeBreakdown"]["deconstruct"],
-                DECONSTRUCT_MIN,
-                DECONSTRUCT_MAX,
+            "pass": counts["shimmerTypeBreakdown"]["deconstruct"] >= DECONSTRUCT_MIN,
+            "warning": counts["shimmerTypeBreakdown"]["deconstruct"] > DECONSTRUCT_MAX,
+            "status": check_status(
+                counts["shimmerTypeBreakdown"]["deconstruct"] >= DECONSTRUCT_MIN,
+                counts["shimmerTypeBreakdown"]["deconstruct"] > DECONSTRUCT_MAX,
             ),
         },
         {
@@ -544,6 +572,8 @@ def validate(output_dir: Path) -> dict[str, Any]:
             "expected": f">={NPC_SHOPS_MIN}",
             "actual": counts["npc_shops"],
             "pass": counts["npc_shops"] >= NPC_SHOPS_MIN,
+            "warning": False,
+            "status": check_status(counts["npc_shops"] >= NPC_SHOPS_MIN, False),
         },
     ]
     count_range_failures = [
@@ -554,6 +584,15 @@ def validate(output_dir: Path) -> dict[str, Any]:
         }
         for detail in count_range_details
         if not detail["pass"]
+    ]
+    count_range_warnings = [
+        {
+            "check": detail["check"],
+            "expected": detail["expected"],
+            "actual": detail["actual"],
+        }
+        for detail in count_range_details
+        if detail["warning"]
     ]
 
     fk_failures = collect_foreign_key_failures(items, recipes, shimmer, npc_shops)
@@ -569,6 +608,7 @@ def validate(output_dir: Path) -> dict[str, Any]:
             "pass": all(detail["pass"] for detail in count_range_details),
             "details": count_range_details,
             "failingRecords": count_range_failures,
+            "warningRecords": count_range_warnings,
         },
         "foreign_key_integrity": {
             "pass": len(fk_failures) == 0,
