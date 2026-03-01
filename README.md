@@ -1,7 +1,7 @@
 # Terraria Data Extraction Guide
 
 This tool reads your local Terraria installation and produces structured JSON and CSV files
-containing item data, crafting recipes, shimmer transforms, and NPC shop inventories.
+containing item data, crafting recipes, shimmer transforms, NPC shop inventories, and sprite metadata.
 You can use the output files for wikis, modding references, data analysis, or any project
 that needs machine-readable Terraria game data.
 
@@ -22,7 +22,7 @@ that needs machine-readable Terraria game data.
 
 ## 1. What It Does
 
-The extractor loads Terraria's game assemblies at runtime and pulls four datasets directly
+The extractor loads Terraria's game assemblies at runtime and pulls five datasets directly
 from the game's own data structures — no manual parsing, no web scraping.
 
 | Dataset | What it contains |
@@ -31,8 +31,13 @@ from the game's own data structures — no manual parsing, no web scraping.
 | **Recipes** | Every crafting recipe: result item, required ingredients (with quantities), crafting stations, and conditions |
 | **Shimmer transforms** | What each item becomes when dropped in Shimmer liquid (`item_transform` type), plus deconstruction yields (`deconstruct` type) |
 | **NPC shops** | Every NPC merchant's shop inventory: NPC identity, shop name, items sold, buy prices, and any unlock conditions |
+| **Sprites** | Sprite manifest metadata (`id`, `category`, `internalName`, `spriteFile`, `width`, `height`) plus extracted PNGs under `sprites/items/` and `sprites/npcs/` |
 
-Each dataset is written to both a JSON file and a CSV file, giving you 8 output files total.
+Each dataset is written to both a JSON file and a CSV file, giving you 10 primary output files,
+plus thousands of sprite PNG files in subdirectories.
+
+The sprite phase is optimized for throughput: it processes image assets in parallel and writes PNGs
+with a lightweight built-in encoder (instead of `System.Drawing`/GDI+).
 
 ---
 
@@ -100,18 +105,19 @@ Phase items: PASS | rows=5455 | json=items.json | csv=items.csv | elapsed=2.31s
 Phase shimmer: PASS | rows=4471 | json=shimmer.json | csv=shimmer.csv | elapsed=1.87s
 Phase recipes: PASS | rows=2940 | json=recipes.json | csv=recipes.csv | elapsed=3.12s
 Phase npc_shops: PASS | rows=25 | json=npc_shops.json | csv=npc_shops.csv | elapsed=0.94s
+Phase sprites: PASS | rows=6102 | json=sprite_manifest.json | csv=sprite_manifest.csv | elapsed=9.90s
 ----------------------------------------
 Output directory: ...\StandaloneExtractor\Output
-Phases passed: 4/4, failed: 0
+Phases passed: 5/5, failed: 0
 ========================================
 ```
 
 Your output files are in `StandaloneExtractor/Output/`.
 
-> **Tip:** You may see `3-dependency-probe FAIL` messages in the bootstrap log even on a
-> successful run. These are non-fatal warnings about XNA framework assemblies that cannot be
-> fully probed in reflection-only mode. If all four phases show `PASS` in the summary,
-> extraction succeeded. See [Troubleshooting](#7-troubleshooting) for details.
+> **Tip:** `3-dependency-probe FAIL` is now intended to be actionable. The extractor ignores
+> `Microsoft.Xna.Framework.*` framework references during probing, so a probe failure usually
+> means at least one non-framework dependency could not be resolved. If all five phases show
+> `PASS` in the summary, extraction still succeeded; otherwise see [Troubleshooting](#7-troubleshooting).
 
 **Step 5 — (Optional) Validate the output**
 
@@ -140,7 +146,7 @@ build, run, and optional validation steps behind a single command.
 | Parameter | Required | Default | Description |
 |---|---|---|---|
 | `-TerrariaExe` | **Yes** | — | Full path to `Terraria.exe` |
-| `-OutputDir` | No | `StandaloneExtractor/Output` | Where to write the 8 output files |
+| `-OutputDir` | No | `StandaloneExtractor/Output` | Where to write the output files (`*.json`, `*.csv`, and `sprites/`) |
 | `-Validate` | No (switch) | off | Run validation after extraction |
 | `-ValidateAfterExtraction` | No (switch) | off | Alias for `-Validate`; runs validation after extraction |
 | `-ValidationJsonOut` | No | `validation/validation-report.json` | Path for the machine-readable validation report |
@@ -221,6 +227,13 @@ You can override this with `--output <path>` (manual run) or `-OutputDir` (scrip
 | `shimmer.csv` | Same data, CSV format | ~4,471 |
 | `npc_shops.json` | All NPC shops as a JSON array | ~25 |
 | `npc_shops.csv` | Same data, CSV format | ~25 |
+| `sprite_manifest.json` | Sprite index for all extracted item/NPC sprites | ~6,102 |
+| `sprite_manifest.csv` | Same sprite index, CSV format | ~6,102 |
+
+Sprite PNG files are also written under:
+
+- `sprites/items/Item_<id>.png`
+- `sprites/npcs/NPC_<id>.png`
 
 Row counts reflect Terraria 1.4.x. They may vary slightly between game versions.
 
@@ -322,6 +335,29 @@ In the CSV, `Items` is a semicolon-separated list in the format `ItemId|Name|Buy
 
 ---
 
+#### `sprite_manifest.json` / `sprite_manifest.csv`
+
+Each record represents one extracted sprite image and where its PNG was written.
+
+JSON fields:
+
+```json
+{
+  "id": 8,
+  "category": "item",
+  "internalName": "Torch",
+  "spriteFile": "sprites/items/Item_8.png",
+  "width": 14,
+  "height": 16
+}
+```
+
+CSV columns: `Id`, `Category`, `InternalName`, `SpriteFile`, `Width`, `Height`
+
+`category` is either `item` or `npc`.
+
+---
+
 ## 6. Validating Your Output
 
 After extraction, run the validator to confirm the output files are complete and internally consistent.
@@ -352,9 +388,9 @@ The script exits with code `0` on PASS and `1` on FAIL.
 ### What the validator checks
 
 **1. Required files exist**
-Confirms that all 8 expected output files (`items.json`, `items.csv`, `recipes.json`,
-`recipes.csv`, `shimmer.json`, `shimmer.csv`, `npc_shops.json`, `npc_shops.csv`) are
-present in the output directory.
+Confirms that all 10 expected output files (`items.json`, `items.csv`, `recipes.json`,
+`recipes.csv`, `shimmer.json`, `shimmer.csv`, `npc_shops.json`, `npc_shops.csv`,
+`sprite_manifest.json`, `sprite_manifest.csv`) are present in the output directory.
 
 **2. Row count ranges**
 Each dataset must fall within a documented range that reflects known Terraria 1.4.x content:
@@ -366,12 +402,22 @@ Each dataset must fall within a documented range that reflects known Terraria 1.
 | Shimmer (item_transform type) | 200 – 350 |
 | Shimmer (deconstruct type) | 3,800 – 4,600 |
 | NPC shops | 25 or more |
+| Sprite manifest rows | 5,500 – 7,000 |
+| Sprite item rows | 5,000 or more |
+| Sprite NPC rows | 600 or more |
 
 **3. Foreign-key integrity**
-Every item ID referenced in recipes, shimmer mappings, and NPC shops must exist in the
+Every item ID referenced in recipes, shimmer mappings, NPC shops, and item sprite manifest rows must exist in the
 items dataset. Zero invalid references = pass.
 
-**4. Spot checks**
+**4. Sprite manifest integrity**
+Every sprite manifest row must have valid shape and references:
+- `id` is a non-negative integer
+- `category` is `item` or `npc`
+- `width` / `height` are positive integers
+- `spriteFile` path matches the category directory and points to an existing PNG file
+
+**5. Spot checks**
 Three specific known-good records must be present:
 - The Torch crafting recipe (result: Torch, ingredients: Gel + Wood)
 - The Merchant's shop must contain Torch for sale
@@ -385,11 +431,12 @@ If any check fails, the report lists the exact failing records so you know what 
 
 ### "I see `3-dependency-probe FAIL` in the output"
 
-This is almost always a **non-fatal warning**, not an error. It appears because Terraria
-references XNA Framework assemblies (`Microsoft.Xna.Framework.*`) that cannot be fully
-resolved in the reflection-only probe mode the extractor uses at startup.
+This is now usually an **actionable warning**. The extractor skips framework references
+(`System.*`, `Microsoft.Xna.Framework.*`) during probing, so failures generally indicate a
+non-framework assembly could not be resolved from Terraria's directory, the app base directory,
+decompiled fallback libraries, or embedded dependencies.
 
-If all four phases show `PASS` in the final summary, the extraction completed successfully
+If all five phases show `PASS` in the final summary, the extraction completed successfully
 and you can ignore these messages.
 
 If the probe warning is accompanied by a phase `FAIL`, see the next sections.
@@ -465,6 +512,7 @@ StandaloneExtractor/Output/_runtime/phase-results/
   shimmer.json
   recipes.json
   npc_shops.json
+  sprites.json
 ```
 
 Each file contains:
@@ -532,5 +580,6 @@ dotnet run --project StandaloneExtractor/StandaloneExtractor.csproj -- ^
   --output "C:\MyProjects\terraria-data"
 ```
 
-The directory will be created if it does not exist. All 8 output files will be placed there.
+The directory will be created if it does not exist. All primary JSON/CSV outputs plus
+the `sprites/` PNG subdirectories will be placed there.
 Phase log files go into `<OutputDir>/_runtime/phase-results/`.

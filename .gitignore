@@ -18,6 +18,7 @@
 /StandaloneExtractor/Output/_runtime/
 /StandaloneExtractor/Output/*
 !/StandaloneExtractor/Output/.gitkeep
+/StandaloneExtractor/Output/sprites/
 
 # Python validation caches
 __pycache__/
