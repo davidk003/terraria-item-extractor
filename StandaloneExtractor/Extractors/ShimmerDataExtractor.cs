@@ -27,7 +27,12 @@ namespace StandaloneExtractor.Extractors
                 throw new FileNotFoundException("Could not locate Terraria.exe for shimmer extraction.", terrariaPath);
             }
 
-            Assembly terrariaAssembly = Assembly.LoadFrom(terrariaPath);
+            TerrariaDependencyResolver.EnsureRegistered(
+                terrariaPath,
+                Path.GetDirectoryName(terrariaPath),
+                FindRepositoryDecompiledDirectory());
+
+            Assembly terrariaAssembly = LoadTerrariaAssembly(terrariaPath);
 
             Type itemType = GetRequiredType(terrariaAssembly, "Terraria.Item");
             Type programType = GetRequiredType(terrariaAssembly, "Terraria.Program");
@@ -415,6 +420,52 @@ namespace StandaloneExtractor.Extractors
             });
 
             return true;
+        }
+
+        private static Assembly LoadTerrariaAssembly(string terrariaExePath)
+        {
+            string fullPath = Path.GetFullPath(terrariaExePath);
+            Assembly loaded = AppDomain.CurrentDomain
+                .GetAssemblies()
+                .FirstOrDefault(assembly =>
+                {
+                    string location = TryGetAssemblyLocation(assembly);
+                    return !string.IsNullOrWhiteSpace(location)
+                        && string.Equals(Path.GetFullPath(location), fullPath, StringComparison.OrdinalIgnoreCase);
+                });
+
+            return loaded ?? Assembly.LoadFrom(fullPath);
+        }
+
+        private static string FindRepositoryDecompiledDirectory()
+        {
+            string assemblyLocation = typeof(ShimmerDataExtractor).Assembly.Location;
+            var current = new DirectoryInfo(Path.GetDirectoryName(assemblyLocation));
+            while (current != null)
+            {
+                string candidatePath = Path.Combine(current.FullName, "decompiled");
+                string relogicLibraryPath = Path.Combine(candidatePath, "Terraria.Libraries.ReLogic.ReLogic.dll");
+                if (File.Exists(relogicLibraryPath))
+                {
+                    return candidatePath;
+                }
+
+                current = current.Parent;
+            }
+
+            return null;
+        }
+
+        private static string TryGetAssemblyLocation(Assembly assembly)
+        {
+            try
+            {
+                return assembly.Location;
+            }
+            catch (NotSupportedException)
+            {
+                return null;
+            }
         }
 
         private static string ResolveTerrariaPath(ExtractionContext context)

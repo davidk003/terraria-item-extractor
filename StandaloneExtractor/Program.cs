@@ -399,7 +399,7 @@ namespace StandaloneExtractor
                         continue;
                     }
 
-                    if (!CanResolveAssembly(reference.Name, terrariaDirectory, decompiledDirectory))
+                    if (!CanResolveAssembly(reference.Name, terrariaDirectory, decompiledDirectory, terrariaExePath))
                     {
                         result.MissingAssemblies.Add(reference.Name);
                     }
@@ -413,7 +413,7 @@ namespace StandaloneExtractor
             return result;
         }
 
-        private static bool CanResolveAssembly(string assemblySimpleName, string terrariaDirectory, string decompiledDirectory)
+        private static bool CanResolveAssembly(string assemblySimpleName, string terrariaDirectory, string decompiledDirectory, string terrariaExePath)
         {
             if (!string.IsNullOrWhiteSpace(terrariaDirectory) && Directory.Exists(terrariaDirectory))
             {
@@ -437,7 +437,15 @@ namespace StandaloneExtractor
             if (!string.IsNullOrWhiteSpace(decompiledDirectory) && Directory.Exists(decompiledDirectory))
             {
                 string pattern = "Terraria.Libraries.*." + assemblySimpleName + ".dll";
-                return Directory.GetFiles(decompiledDirectory, pattern).Length > 0;
+                if (Directory.GetFiles(decompiledDirectory, pattern).Length > 0)
+                {
+                    return true;
+                }
+            }
+
+            if (TerrariaDependencyResolver.HasEmbeddedDependency(terrariaExePath, assemblySimpleName))
+            {
+                return true;
             }
 
             return false;

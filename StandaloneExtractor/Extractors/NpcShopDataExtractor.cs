@@ -14,10 +14,6 @@ namespace StandaloneExtractor.Extractors
     public sealed class NpcShopDataExtractor : IExtractorPhase<NpcShopRow>
     {
         private const string DefaultTerrariaExePath = @"C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe";
-        private static readonly object AssemblyResolveLock = new object();
-        private static bool _assemblyResolveRegistered;
-        private static string _terrariaDirectoryForResolve;
-        private static string _decompiledDirectoryForResolve;
         private const int TravelShopSamplingRuns = 200;
         private static readonly Regex IfRegex = new Regex(@"^(?:else\s+)?if\s*\((.+)\)", RegexOptions.Compiled);
         private static readonly Regex CaseRegex = new Regex(@"^case\s+(\d+)\s*:", RegexOptions.Compiled);
@@ -1482,50 +1478,9 @@ namespace StandaloneExtractor.Extractors
             string terrariaDirectory = Path.GetDirectoryName(terrariaExePath);
             string decompiledDirectory = FindRepositoryDecompiledDirectory();
 
-            lock (AssemblyResolveLock)
-            {
-                _terrariaDirectoryForResolve = terrariaDirectory;
-                _decompiledDirectoryForResolve = decompiledDirectory;
-                if (!_assemblyResolveRegistered)
-                {
-                    AppDomain.CurrentDomain.AssemblyResolve += OnAssemblyResolve;
-                    _assemblyResolveRegistered = true;
-                }
-            }
+            TerrariaDependencyResolver.EnsureRegistered(terrariaExePath, terrariaDirectory, decompiledDirectory);
 
             return Assembly.LoadFrom(terrariaExePath);
-        }
-
-        private static Assembly OnAssemblyResolve(object sender, ResolveEventArgs args)
-        {
-            string assemblyName = new AssemblyName(args.Name).Name;
-
-            string terrariaDirectory = _terrariaDirectoryForResolve;
-            if (!string.IsNullOrWhiteSpace(terrariaDirectory) && Directory.Exists(terrariaDirectory))
-            {
-                string dllPath = Path.Combine(terrariaDirectory, assemblyName + ".dll");
-                if (File.Exists(dllPath))
-                {
-                    return Assembly.LoadFrom(dllPath);
-                }
-
-                string exePath = Path.Combine(terrariaDirectory, assemblyName + ".exe");
-                if (File.Exists(exePath))
-                {
-                    return Assembly.LoadFrom(exePath);
-                }
-            }
-
-            string decompiledDirectory = _decompiledDirectoryForResolve;
-            if (!string.IsNullOrWhiteSpace(decompiledDirectory) && Directory.Exists(decompiledDirectory))
-            {
-                foreach (string libraryPath in Directory.GetFiles(decompiledDirectory, "Terraria.Libraries.*." + assemblyName + ".dll"))
-                {
-                    return Assembly.LoadFrom(libraryPath);
-                }
-            }
-
-            return null;
         }
 
         private static string FindRepositoryDecompiledDirectory()

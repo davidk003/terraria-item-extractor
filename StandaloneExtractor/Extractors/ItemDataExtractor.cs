@@ -11,10 +11,6 @@ namespace StandaloneExtractor.Extractors
     public sealed class ItemDataExtractor : IExtractorPhase<ItemRow>
     {
         private const string DefaultTerrariaDirectory = @"C:\Program Files (x86)\Steam\steamapps\common\Terraria";
-        private static readonly object AssemblyResolveLock = new object();
-        private static string _terrariaDirectoryForResolve;
-        private static string _decompiledDirectoryForResolve;
-        private static bool _assemblyResolveRegistered;
 
         public string PhaseName
         {
@@ -31,7 +27,10 @@ namespace StandaloneExtractor.Extractors
 
             string decompiledDirectory = FindRepositoryDecompiledDirectory();
             string loadableTerrariaExePath = EnsureTerrariaRuntimeDependencies(terrariaExePath, decompiledDirectory);
-            EnsureTerrariaAssemblyResolve(Path.GetDirectoryName(loadableTerrariaExePath));
+            TerrariaDependencyResolver.EnsureRegistered(
+                loadableTerrariaExePath,
+                Path.GetDirectoryName(loadableTerrariaExePath),
+                decompiledDirectory);
             Assembly terrariaAssembly = Assembly.LoadFrom(loadableTerrariaExePath);
             Type itemType = terrariaAssembly.GetType("Terraria.Item", throwOnError: true);
             Type itemIdType = terrariaAssembly.GetType("Terraria.ID.ItemID", throwOnError: true);
@@ -84,22 +83,6 @@ namespace StandaloneExtractor.Extractors
 
             Console.WriteLine("[ItemDataExtractor] Extracted " + rows.Count + " items (id range: 1-" + (itemCount - 1).ToString(CultureInfo.InvariantCulture) + ").");
             return rows;
-        }
-
-        private static void EnsureTerrariaAssemblyResolve(string terrariaDirectory)
-        {
-            lock (AssemblyResolveLock)
-            {
-                _terrariaDirectoryForResolve = terrariaDirectory;
-                _decompiledDirectoryForResolve = FindRepositoryDecompiledDirectory();
-                if (_assemblyResolveRegistered)
-                {
-                    return;
-                }
-
-                AppDomain.CurrentDomain.AssemblyResolve += OnAssemblyResolve;
-                _assemblyResolveRegistered = true;
-            }
         }
 
         private static string EnsureTerrariaRuntimeDependencies(string terrariaExePath, string decompiledDirectory)
@@ -277,35 +260,5 @@ namespace StandaloneExtractor.Extractors
             }
         }
 
-        private static Assembly OnAssemblyResolve(object sender, ResolveEventArgs args)
-        {
-            string directory = _terrariaDirectoryForResolve;
-            string assemblyName = new AssemblyName(args.Name).Name;
-            if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory))
-            {
-                string dllPath = Path.Combine(directory, assemblyName + ".dll");
-                if (File.Exists(dllPath))
-                {
-                    return Assembly.LoadFrom(dllPath);
-                }
-
-                string exePath = Path.Combine(directory, assemblyName + ".exe");
-                if (File.Exists(exePath))
-                {
-                    return Assembly.LoadFrom(exePath);
-                }
-            }
-
-            string decompiledDirectory = _decompiledDirectoryForResolve;
-            if (!string.IsNullOrWhiteSpace(decompiledDirectory) && Directory.Exists(decompiledDirectory))
-            {
-                foreach (string sourceLibraryPath in Directory.GetFiles(decompiledDirectory, "Terraria.Libraries.*." + assemblyName + ".dll"))
-                {
-                    return Assembly.LoadFrom(sourceLibraryPath);
-                }
-            }
-
-            return null;
-        }
     }
 }
