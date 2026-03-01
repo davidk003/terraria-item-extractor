@@ -114,10 +114,10 @@ Phases passed: 5/5, failed: 0
 
 Your output files are in `StandaloneExtractor/Output/`.
 
-> **Tip:** You may see `3-dependency-probe FAIL` messages in the bootstrap log even on a
-> successful run. These are non-fatal warnings about XNA framework assemblies that cannot be
-> fully probed in reflection-only mode. If all five phases show `PASS` in the summary,
-> extraction succeeded. See [Troubleshooting](#7-troubleshooting) for details.
+> **Tip:** `3-dependency-probe FAIL` is now intended to be actionable. The extractor ignores
+> `Microsoft.Xna.Framework.*` framework references during probing, so a probe failure usually
+> means at least one non-framework dependency could not be resolved. If all five phases show
+> `PASS` in the summary, extraction still succeeded; otherwise see [Troubleshooting](#7-troubleshooting).
 
 **Step 5 — (Optional) Validate the output**
 
@@ -431,9 +431,10 @@ If any check fails, the report lists the exact failing records so you know what 
 
 ### "I see `3-dependency-probe FAIL` in the output"
 
-This is almost always a **non-fatal warning**, not an error. It appears because Terraria
-references XNA Framework assemblies (`Microsoft.Xna.Framework.*`) that cannot be fully
-resolved in the reflection-only probe mode the extractor uses at startup.
+This is now usually an **actionable warning**. The extractor skips framework references
+(`System.*`, `Microsoft.Xna.Framework.*`) during probing, so failures generally indicate a
+non-framework assembly could not be resolved from Terraria's directory, the app base directory,
+decompiled fallback libraries, or embedded dependencies.
 
 If all five phases show `PASS` in the final summary, the extraction completed successfully
 and you can ignore these messages.

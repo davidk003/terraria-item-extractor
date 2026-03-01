@@ -475,7 +475,13 @@ namespace StandaloneExtractor
                 return true;
             }
 
-            return assemblySimpleName.StartsWith("System.", StringComparison.OrdinalIgnoreCase);
+            if (assemblySimpleName.StartsWith("System.", StringComparison.OrdinalIgnoreCase)
+                || assemblySimpleName.StartsWith("Microsoft.Xna.Framework", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private static List<string> BuildDependencyDiagnostics(Exception ex, string terrariaDirectory, string decompiledDirectory)
