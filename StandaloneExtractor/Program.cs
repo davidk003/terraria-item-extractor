@@ -23,7 +23,8 @@ namespace StandaloneExtractor
             new PhaseDefinition("items", "items"),
             new PhaseDefinition("shimmer", "shimmer"),
             new PhaseDefinition("recipes", "recipes"),
-            new PhaseDefinition("npc_shops", "npc_shops")
+            new PhaseDefinition("npc_shops", "npc_shops"),
+            new PhaseDefinition("sprites", "sprite_manifest")
         };
 
         private static int Main(string[] args)
@@ -267,6 +268,11 @@ namespace StandaloneExtractor
             if (string.Equals(phaseKey, "npc_shops", StringComparison.Ordinal))
             {
                 return RunPhase(new NpcShopDataExtractor(), context, jsonWriter, csvWriter, fileStem, phaseKey);
+            }
+
+            if (string.Equals(phaseKey, "sprites", StringComparison.Ordinal))
+            {
+                return RunPhase(new SpriteExtractorPhase(), context, jsonWriter, csvWriter, fileStem, phaseKey);
             }
 
             return CreateFailedResult(phaseKey, fileStem, context.OutputDirectory, "Unsupported phase key: " + phaseKey);
@@ -1269,7 +1275,7 @@ namespace StandaloneExtractor
             Console.WriteLine("----------------------------------------");
             Console.WriteLine("Output directory: " + outputDirectory);
             Console.WriteLine("Phases passed: " + successCount + "/" + phaseResults.Count + ", failed: " + failureCount);
-            Console.WriteLine("Expected output files: 8");
+            Console.WriteLine("Expected output files: " + (OrderedPhases.Length * 2));
             Console.WriteLine("Troubleshooting guide: README.md#7-troubleshooting");
             Console.WriteLine("========================================");
         }

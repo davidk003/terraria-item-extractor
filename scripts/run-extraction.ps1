@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-    Builds and runs the Terraria data extractor, then optionally validates the output.
+    Builds and runs the 5-phase Terraria data extractor, then optionally validates the output.
 
 .DESCRIPTION
     Automates the build, extraction, and (optionally) validation steps described in
-    README.md. Each stage prints a clear banner so you can
+    README.md. Extraction covers items, shimmer, recipes, npc_shops, and sprites.
+    Each stage prints a clear banner so you can
     follow progress. Exits non-zero on build failure or extraction failure.
 
 .PARAMETER TerrariaExe
@@ -12,7 +13,7 @@
     Example: "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe"
 
 .PARAMETER OutputDir
-    Optional. Directory where JSON and CSV output files are written.
+    Optional. Directory where extractor outputs are written (JSON, CSV, and sprites/ PNGs).
     Default: StandaloneExtractor/Output (relative to the repo root).
 
 .PARAMETER Validate
@@ -48,7 +49,7 @@
 
 .NOTES
     Exit codes:
-      0 - All phases passed (and validation passed, if -Validate or -ValidateAfterExtraction was used)
+      0 - All five phases passed (and validation passed, if -Validate or -ValidateAfterExtraction was used)
       1 - Build failed, extraction failed, or validation reported FAIL
 #>
 
@@ -146,6 +147,7 @@ function Write-Step {
 # ---------------------------------------------------------------------------
 
 Write-Banner "Terraria Data Extractor"
+Write-Step "Phases: items, shimmer, recipes, npc_shops, sprites"
 
 Write-Step "Checking Terraria.exe..."
 if (-not (Test-Path $TerrariaExe)) {
@@ -203,6 +205,8 @@ if ($ExtractionExitCode -ne 0) {
 
 Write-Host ""
 Write-Host "Extraction complete. Output files are in: $OutputDir"
+Write-Host "  - Primary datasets: items/recipes/shimmer/npc_shops/sprite_manifest (JSON + CSV)"
+Write-Host "  - Sprite PNGs: $OutputDir\sprites\items\ and $OutputDir\sprites\npcs\"
 
 # ---------------------------------------------------------------------------
 # Stage 3 (optional): Validate
@@ -210,7 +214,7 @@ Write-Host "Extraction complete. Output files are in: $OutputDir"
 
 if (-not $ShouldValidate) {
     Write-Banner "Done"
-    Write-Host "All phases passed."
+    Write-Host "All five phases passed."
     Write-Host ""
     Write-Host "To validate the output, re-run with -Validate (or -ValidateAfterExtraction), or run manually:"
     Write-Host "  python validation/run_validation.py ^"

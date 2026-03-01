@@ -20,6 +20,8 @@ REQUIRED_FILES = (
     "shimmer.csv",
     "npc_shops.json",
     "npc_shops.csv",
+    "sprite_manifest.json",
+    "sprite_manifest.csv",
 )
 
 ITEMS_MIN = 5300
@@ -36,6 +38,11 @@ ITEM_TRANSFORM_MAX = 350
 # or patch-level content changes.
 DECONSTRUCT_MIN = 3800
 DECONSTRUCT_MAX = 4600
+
+SPRITE_MANIFEST_MIN = 5500
+SPRITE_MANIFEST_MAX = 7000
+SPRITE_ITEM_MIN = 5000
+SPRITE_NPC_MIN = 600
 
 
 def parse_args() -> argparse.Namespace:
@@ -82,6 +89,7 @@ def collect_foreign_key_failures(
     recipes: list[dict[str, Any]],
     shimmer: list[dict[str, Any]],
     npc_shops: list[dict[str, Any]],
+    sprite_manifest: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     valid_item_ids = {item.get("Id") for item in items if isinstance(item.get("Id"), int)}
     failures: list[dict[str, Any]] = []
@@ -185,6 +193,133 @@ def collect_foreign_key_failures(
                         "itemIndex": item_index,
                     }
                 )
+
+    for sprite_index, row in enumerate(sprite_manifest):
+        if not isinstance(row, dict):
+            failures.append(
+                {
+                    "dataset": "sprite_manifest",
+                    "recordId": sprite_index,
+                    "field": "row",
+                    "itemId": None,
+                }
+            )
+            continue
+
+        category = str(row.get("category", "")).strip().lower()
+        if category != "item":
+            continue
+
+        item_id = row.get("id")
+        if isinstance(item_id, int) and item_id > 0 and item_id not in valid_item_ids:
+            failures.append(
+                {
+                    "dataset": "sprite_manifest",
+                    "recordId": sprite_index,
+                    "field": "id",
+                    "itemId": item_id,
+                }
+            )
+
+    return failures
+
+
+def collect_sprite_manifest_integrity_failures(
+    output_dir: Path,
+    sprite_manifest: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+
+    for index, row in enumerate(sprite_manifest):
+        if not isinstance(row, dict):
+            failures.append(
+                {
+                    "recordIndex": index,
+                    "field": "row",
+                    "error": "record is not an object",
+                }
+            )
+            continue
+
+        category = str(row.get("category", "")).strip().lower()
+        sprite_file = row.get("spriteFile")
+        width = row.get("width")
+        height = row.get("height")
+        row_id = row.get("id")
+
+        if not isinstance(row_id, int) or row_id < 0:
+            failures.append(
+                {
+                    "recordIndex": index,
+                    "field": "id",
+                    "error": "id must be a non-negative integer",
+                    "value": row_id,
+                }
+            )
+
+        if category not in {"item", "npc"}:
+            failures.append(
+                {
+                    "recordIndex": index,
+                    "field": "category",
+                    "error": "category must be 'item' or 'npc'",
+                    "value": row.get("category"),
+                }
+            )
+
+        if not isinstance(width, int) or width <= 0:
+            failures.append(
+                {
+                    "recordIndex": index,
+                    "field": "width",
+                    "error": "width must be a positive integer",
+                    "value": width,
+                }
+            )
+
+        if not isinstance(height, int) or height <= 0:
+            failures.append(
+                {
+                    "recordIndex": index,
+                    "field": "height",
+                    "error": "height must be a positive integer",
+                    "value": height,
+                }
+            )
+
+        if not isinstance(sprite_file, str) or not sprite_file.strip():
+            failures.append(
+                {
+                    "recordIndex": index,
+                    "field": "spriteFile",
+                    "error": "spriteFile must be a non-empty string",
+                    "value": sprite_file,
+                }
+            )
+            continue
+
+        normalized_path = sprite_file.replace("\\", "/").lstrip("/")
+        expected_prefix = "sprites/items/" if category == "item" else "sprites/npcs/" if category == "npc" else None
+        if expected_prefix is not None and not normalized_path.startswith(expected_prefix):
+            failures.append(
+                {
+                    "recordIndex": index,
+                    "field": "spriteFile",
+                    "error": f"spriteFile must start with '{expected_prefix}' for category '{category}'",
+                    "value": sprite_file,
+                }
+            )
+
+        resolved_file = output_dir.joinpath(*[part for part in normalized_path.split("/") if part])
+        if not resolved_file.exists():
+            failures.append(
+                {
+                    "recordIndex": index,
+                    "field": "spriteFile",
+                    "error": "referenced sprite PNG is missing",
+                    "value": sprite_file,
+                }
+            )
 
     return failures
 
@@ -307,6 +442,8 @@ def build_markdown_report(report: dict[str, Any]) -> str:
         "- Shimmer validation is typed, not total-only:",
         f"  - `item_transform` count must be at least `{ITEM_TRANSFORM_MIN}`; above `{ITEM_TRANSFORM_MAX}` is a warning (historically around ~260)",
         f"  - `deconstruct` count must be at least `{DECONSTRUCT_MIN}`; above `{DECONSTRUCT_MAX}` is a warning (baseline around `4227`, bounded tolerance for drift)",
+        f"- Sprite manifest count must be at least `{SPRITE_MANIFEST_MIN}`; above `{SPRITE_MANIFEST_MAX}` is a warning.",
+        f"- Sprite category minimums: `item >= {SPRITE_ITEM_MIN}`, `npc >= {SPRITE_NPC_MIN}`.",
         "- All dataset count checks use hard minimums and soft upper-bound warnings.",
         "",
         "## Counts",
@@ -315,6 +452,12 @@ def build_markdown_report(report: dict[str, Any]) -> str:
         f"- recipes: {counts['recipes']}",
         f"- shimmer: {counts['shimmer']}",
         f"- npc shops: {counts['npc_shops']}",
+        f"- sprite manifest: {counts['sprite_manifest']}",
+        (
+            "- sprite category breakdown: "
+            f"`item={counts['spriteCategoryBreakdown']['item']}`, "
+            f"`npc={counts['spriteCategoryBreakdown']['npc']}`"
+        ),
         (
             "- shimmer type breakdown: "
             f"`item_transform={counts['shimmerTypeBreakdown']['item_transform']}`, "
@@ -325,7 +468,7 @@ def build_markdown_report(report: dict[str, Any]) -> str:
         "",
         "### 1) Required files exist",
         f"- Result: {pass_fail(checks['required_files']['pass'])}",
-        "- Evidence: all required files are present (`items.json`, `items.csv`, `recipes.json`, `recipes.csv`, `shimmer.json`, `shimmer.csv`, `npc_shops.json`, `npc_shops.csv`)"
+        "- Evidence: all required files are present (`items.json`, `items.csv`, `recipes.json`, `recipes.csv`, `shimmer.json`, `shimmer.csv`, `npc_shops.json`, `npc_shops.csv`, `sprite_manifest.json`, `sprite_manifest.csv`)"
         if checks["required_files"]["pass"]
         else "- Evidence: one or more required files are missing",
     ]
@@ -373,6 +516,21 @@ def build_markdown_report(report: dict[str, Any]) -> str:
                 f"{pass_warn_fail(detail_by_name['npc_shops_min'])} "
                 f"(actual `{detail_by_name['npc_shops_min']['actual']}`)"
             ),
+            (
+                f"- Sprite manifest count check (min `{SPRITE_MANIFEST_MIN}`, soft max `{SPRITE_MANIFEST_MAX}`): "
+                f"{pass_warn_fail(detail_by_name['sprite_manifest_range'])} "
+                f"(actual `{detail_by_name['sprite_manifest_range']['actual']}`)"
+            ),
+            (
+                f"- Sprite item rows minimum (`>={SPRITE_ITEM_MIN}`): "
+                f"{pass_warn_fail(detail_by_name['sprite_items_min'])} "
+                f"(actual `{detail_by_name['sprite_items_min']['actual']}`)"
+            ),
+            (
+                f"- Sprite NPC rows minimum (`>={SPRITE_NPC_MIN}`): "
+                f"{pass_warn_fail(detail_by_name['sprite_npcs_min'])} "
+                f"(actual `{detail_by_name['sprite_npcs_min']['actual']}`)"
+            ),
         ]
     )
 
@@ -409,7 +567,7 @@ def build_markdown_report(report: dict[str, Any]) -> str:
             "",
             "### 3) Foreign-key integrity (referenced item IDs must exist)",
             f"- Result: {pass_fail(checks['foreign_key_integrity']['pass'])}",
-            "- Datasets checked: `recipes`, `shimmer`, `npc_shops`",
+            "- Datasets checked: `recipes`, `shimmer`, `npc_shops`, `sprite_manifest`",
             f"- Valid item ID set size: `{checks['foreign_key_integrity']['details']['validItemIdCount']}`",
             f"- Invalid references found: `{checks['foreign_key_integrity']['details']['invalidReferenceCount']}`",
         ]
@@ -431,7 +589,30 @@ def build_markdown_report(report: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "### 4) Spot checks",
+            "### 4) Sprite manifest integrity",
+            f"- Result: {pass_fail(checks['sprite_manifest_integrity']['pass'])}",
+            f"- Rows checked: `{checks['sprite_manifest_integrity']['details']['checkedRows']}`",
+            f"- Integrity failures found: `{checks['sprite_manifest_integrity']['details']['failureCount']}`",
+        ]
+    )
+
+    if checks["sprite_manifest_integrity"]["failingRecords"]:
+        lines.extend(
+            [
+                "- Failing records (exact):",
+                "",
+                "```json",
+                json.dumps(checks["sprite_manifest_integrity"]["failingRecords"], indent=2, sort_keys=True),
+                "```",
+            ]
+        )
+    else:
+        lines.append("- Failing records: none")
+
+    lines.extend(
+        [
+            "",
+            "### 5) Spot checks",
             f"- Result: {pass_fail(checks['spot_checks']['pass'])}",
         ]
     )
@@ -504,10 +685,11 @@ def validate(output_dir: Path) -> dict[str, Any]:
     recipes, recipes_load_error = load_json_array(output_dir / "recipes.json")
     shimmer, shimmer_load_error = load_json_array(output_dir / "shimmer.json")
     npc_shops, npc_shops_load_error = load_json_array(output_dir / "npc_shops.json")
+    sprite_manifest, sprite_manifest_load_error = load_json_array(output_dir / "sprite_manifest.json")
 
     load_errors = [
         error
-        for error in [items_load_error, recipes_load_error, shimmer_load_error, npc_shops_load_error]
+        for error in [items_load_error, recipes_load_error, shimmer_load_error, npc_shops_load_error, sprite_manifest_load_error]
         if error is not None
     ]
     for error in load_errors:
@@ -522,9 +704,14 @@ def validate(output_dir: Path) -> dict[str, Any]:
         "recipes": len(recipes),
         "shimmer": len(shimmer),
         "npc_shops": len(npc_shops),
+        "sprite_manifest": len(sprite_manifest),
         "shimmerTypeBreakdown": {
             "item_transform": int(shimmer_type_counter.get("item_transform", 0)),
             "deconstruct": int(shimmer_type_counter.get("deconstruct", 0)),
+        },
+        "spriteCategoryBreakdown": {
+            "item": sum(1 for row in sprite_manifest if isinstance(row, dict) and str(row.get("category", "")).strip().lower() == "item"),
+            "npc": sum(1 for row in sprite_manifest if isinstance(row, dict) and str(row.get("category", "")).strip().lower() == "npc"),
         },
     }
 
@@ -575,6 +762,30 @@ def validate(output_dir: Path) -> dict[str, Any]:
             "warning": False,
             "status": check_status(counts["npc_shops"] >= NPC_SHOPS_MIN, False),
         },
+        {
+            "check": "sprite_manifest_range",
+            "expected": f"{SPRITE_MANIFEST_MIN}-{SPRITE_MANIFEST_MAX}",
+            "actual": counts["sprite_manifest"],
+            "pass": counts["sprite_manifest"] >= SPRITE_MANIFEST_MIN,
+            "warning": counts["sprite_manifest"] > SPRITE_MANIFEST_MAX,
+            "status": check_status(counts["sprite_manifest"] >= SPRITE_MANIFEST_MIN, counts["sprite_manifest"] > SPRITE_MANIFEST_MAX),
+        },
+        {
+            "check": "sprite_items_min",
+            "expected": f">={SPRITE_ITEM_MIN}",
+            "actual": counts["spriteCategoryBreakdown"]["item"],
+            "pass": counts["spriteCategoryBreakdown"]["item"] >= SPRITE_ITEM_MIN,
+            "warning": False,
+            "status": check_status(counts["spriteCategoryBreakdown"]["item"] >= SPRITE_ITEM_MIN, False),
+        },
+        {
+            "check": "sprite_npcs_min",
+            "expected": f">={SPRITE_NPC_MIN}",
+            "actual": counts["spriteCategoryBreakdown"]["npc"],
+            "pass": counts["spriteCategoryBreakdown"]["npc"] >= SPRITE_NPC_MIN,
+            "warning": False,
+            "status": check_status(counts["spriteCategoryBreakdown"]["npc"] >= SPRITE_NPC_MIN, False),
+        },
     ]
     count_range_failures = [
         {
@@ -595,8 +806,9 @@ def validate(output_dir: Path) -> dict[str, Any]:
         if detail["warning"]
     ]
 
-    fk_failures = collect_foreign_key_failures(items, recipes, shimmer, npc_shops)
+    fk_failures = collect_foreign_key_failures(items, recipes, shimmer, npc_shops, sprite_manifest)
     spot_checks, spot_failures = run_spot_checks(recipes, shimmer, npc_shops)
+    sprite_manifest_integrity_failures = collect_sprite_manifest_integrity_failures(output_dir, sprite_manifest)
 
     checks = {
         "required_files": {
@@ -613,11 +825,19 @@ def validate(output_dir: Path) -> dict[str, Any]:
         "foreign_key_integrity": {
             "pass": len(fk_failures) == 0,
             "details": {
-                "checkedDatasets": ["recipes", "shimmer", "npc_shops"],
+                "checkedDatasets": ["recipes", "shimmer", "npc_shops", "sprite_manifest"],
                 "validItemIdCount": len({item.get("Id") for item in items if isinstance(item.get("Id"), int)}),
                 "invalidReferenceCount": len(fk_failures),
             },
             "failingRecords": fk_failures,
+        },
+        "sprite_manifest_integrity": {
+            "pass": len(sprite_manifest_integrity_failures) == 0,
+            "details": {
+                "checkedRows": len(sprite_manifest),
+                "failureCount": len(sprite_manifest_integrity_failures),
+            },
+            "failingRecords": sprite_manifest_integrity_failures,
         },
         "spot_checks": {
             "pass": len(spot_failures) == 0,
