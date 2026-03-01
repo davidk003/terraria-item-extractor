@@ -142,6 +142,7 @@ build, run, and optional validation steps behind a single command.
 | `-TerrariaExe` | **Yes** | — | Full path to `Terraria.exe` |
 | `-OutputDir` | No | `StandaloneExtractor/Output` | Where to write the 8 output files |
 | `-Validate` | No (switch) | off | Run validation after extraction |
+| `-ValidateAfterExtraction` | No (switch) | off | Alias for `-Validate`; runs validation after extraction |
 | `-ValidationJsonOut` | No | `validation/validation-report.json` | Path for the machine-readable validation report |
 | `-ValidationMdOut` | No | `validation/validation-report.md` | Path for the human-readable validation report |
 
@@ -169,6 +170,14 @@ build, run, and optional validation steps behind a single command.
   -Validate
 ```
 
+**With validation (explicit option name):**
+
+```powershell
+.\scripts\run-extraction.ps1 `
+  -TerrariaExe "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe" `
+  -ValidateAfterExtraction
+```
+
 **Custom validation report paths:**
 
 ```powershell
@@ -183,7 +192,7 @@ build, run, and optional validation steps behind a single command.
 
 | Code | Meaning |
 |---|---|
-| `0` | All phases passed (and validation passed, if `-Validate` was used) |
+| `0` | All phases passed (and validation passed, if `-Validate` or `-ValidateAfterExtraction` was used) |
 | `1` | Build failed, extraction failed, or validation reported FAIL |
 
 ---

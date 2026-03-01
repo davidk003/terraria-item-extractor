@@ -19,6 +19,9 @@
     Switch. When set, runs the Python validator after extraction and exits non-zero
     if validation reports FAIL.
 
+.PARAMETER ValidateAfterExtraction
+    Switch. Alias for -Validate. Runs validation immediately after extraction.
+
 .PARAMETER ValidationJsonOut
     Optional. Path for the machine-readable validation report (JSON).
     Default: validation/validation-report.json
@@ -39,9 +42,13 @@
     With validation:
     .\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe" -Validate
 
+.EXAMPLE
+    With validation (explicit option name):
+    .\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe" -ValidateAfterExtraction
+
 .NOTES
     Exit codes:
-      0 - All phases passed (and validation passed, if -Validate was used)
+      0 - All phases passed (and validation passed, if -Validate or -ValidateAfterExtraction was used)
       1 - Build failed, extraction failed, or validation reported FAIL
 #>
 
@@ -55,6 +62,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch]$Validate,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ValidateAfterExtraction,
 
     [Parameter(Mandatory = $false)]
     [string]$ValidationJsonOut = "",
@@ -109,6 +119,8 @@ if ($ValidationJsonOut -eq "") {
 if ($ValidationMdOut -eq "") {
     $ValidationMdOut = Join-Path $RepoRoot "validation\validation-report.md"
 }
+
+$ShouldValidate = $Validate -or $ValidateAfterExtraction
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -196,11 +208,11 @@ Write-Host "Extraction complete. Output files are in: $OutputDir"
 # Stage 3 (optional): Validate
 # ---------------------------------------------------------------------------
 
-if (-not $Validate) {
+if (-not $ShouldValidate) {
     Write-Banner "Done"
     Write-Host "All phases passed."
     Write-Host ""
-    Write-Host "To validate the output, re-run with -Validate, or run manually:"
+    Write-Host "To validate the output, re-run with -Validate (or -ValidateAfterExtraction), or run manually:"
     Write-Host "  python validation/run_validation.py ^"
     Write-Host "    --output-dir `"$OutputDir`" ^"
     Write-Host "    --json-out `"$ValidationJsonOut`" ^"

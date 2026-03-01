@@ -30,10 +30,10 @@ NPC_SHOPS_MIN = 25
 ITEM_TRANSFORM_MIN = 200
 ITEM_TRANSFORM_MAX = 350
 
-# Explicitly documented D2 contract:
-# C2 baseline data had deconstruct=4227. Keep a bounded, explicit envelope
-# around this known level so validation catches real regressions while allowing
-# minor drift from runtime ordering or patch-level content changes.
+# Deconstruct count was observed near 4227 in a reference baseline run.
+# Keep a bounded, explicit envelope around this known level so validation
+# catches real regressions while allowing minor drift from runtime ordering
+# or patch-level content changes.
 DECONSTRUCT_MIN = 3800
 DECONSTRUCT_MAX = 4600
 
@@ -290,16 +290,16 @@ def build_markdown_report(report: dict[str, Any]) -> str:
     detail_by_name = {entry["check"]: entry for entry in count_range_details}
 
     lines: list[str] = [
-        "# Validation Report (D2)",
+        "# Validation Report",
         "",
         f"- Status: {report['status']}",
         f"- Output directory: `{report['outputDirectory']}`",
         "",
-        "## Contract",
+        "## Validation Rules",
         "",
         "- Shimmer validation is typed, not total-only:",
         f"  - `item_transform` count must be `{ITEM_TRANSFORM_MIN}-{ITEM_TRANSFORM_MAX}` (historically around ~260)",
-        f"  - `deconstruct` count must be `{DECONSTRUCT_MIN}-{DECONSTRUCT_MAX}` (baseline `4227` from C2, bounded tolerance for drift)",
+        f"  - `deconstruct` count must be `{DECONSTRUCT_MIN}-{DECONSTRUCT_MAX}` (baseline around `4227`, bounded tolerance for drift)",
         "",
         "## Counts",
         "",
@@ -588,7 +588,7 @@ def validate(output_dir: Path) -> dict[str, Any]:
 
     status = "PASS" if all(section["pass"] for section in checks.values()) else "FAIL"
     report = {
-        "validator": "D2 - Validation Contract Alignment Agent",
+        "validator": "Terraria Extractor Validation Tool",
         "status": status,
         "outputDirectory": str(output_dir).replace("\\", "/"),
         "counts": counts,
