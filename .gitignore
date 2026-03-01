@@ -1,1 +1,30 @@
-/decompiled*
+# Decompiled Terraria sources (large/local)
+/decompiled*/
+
+# .NET build artifacts
+**/[Bb]in/
+**/[Oo]bj/
+
+# IDE and user-specific files
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Extractor runtime/output artifacts
+/StandaloneExtractor/_terraria-save/
+/StandaloneExtractor/Output-*/
+/StandaloneExtractor/Output/_runtime/
+/StandaloneExtractor/Output/*
+!/StandaloneExtractor/Output/.gitkeep
+
+# Python validation caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log
