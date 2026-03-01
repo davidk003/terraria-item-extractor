@@ -65,7 +65,7 @@ cd <repo-name>
 **Step 2 — Build the extractor**
 
 ```
-dotnet build extract-mod/StandaloneExtractor/StandaloneExtractor.csproj
+dotnet build StandaloneExtractor/StandaloneExtractor.csproj
 ```
 
 Expected output (last few lines):
@@ -81,13 +81,13 @@ Build succeeded.
 If Terraria is installed in the default Steam location:
 
 ```
-dotnet run --project extract-mod/StandaloneExtractor/StandaloneExtractor.csproj -- --terraria "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe"
+dotnet run --project StandaloneExtractor/StandaloneExtractor.csproj -- --terraria "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe"
 ```
 
 If Terraria is installed somewhere else, adjust the path:
 
 ```
-dotnet run --project extract-mod/StandaloneExtractor/StandaloneExtractor.csproj -- --terraria "D:\Games\Terraria\Terraria.exe"
+dotnet run --project StandaloneExtractor/StandaloneExtractor.csproj -- --terraria "D:\Games\Terraria\Terraria.exe"
 ```
 
 **Step 4 — Confirm it worked**
@@ -101,12 +101,12 @@ Phase shimmer: PASS | rows=4471 | json=shimmer.json | csv=shimmer.csv | elapsed=
 Phase recipes: PASS | rows=2940 | json=recipes.json | csv=recipes.csv | elapsed=3.12s
 Phase npc_shops: PASS | rows=25 | json=npc_shops.json | csv=npc_shops.csv | elapsed=0.94s
 ----------------------------------------
-Output directory: ...\extract-mod\StandaloneExtractor\Output
+Output directory: ...\StandaloneExtractor\Output
 Phases passed: 4/4, failed: 0
 ========================================
 ```
 
-Your output files are in `extract-mod/StandaloneExtractor/Output/`.
+Your output files are in `StandaloneExtractor/Output/`.
 
 > **Tip:** You may see `3-dependency-probe FAIL` messages in the bootstrap log even on a
 > successful run. These are non-fatal warnings about XNA framework assemblies that cannot be
@@ -116,10 +116,10 @@ Your output files are in `extract-mod/StandaloneExtractor/Output/`.
 **Step 5 — (Optional) Validate the output**
 
 ```
-python extract-mod/validation/run_validation.py ^
-  --output-dir extract-mod/StandaloneExtractor/Output ^
-  --json-out extract-mod/validation/validation-report.json ^
-  --md-out extract-mod/validation/validation-report.md
+python validation/run_validation.py ^
+  --output-dir StandaloneExtractor/Output ^
+  --json-out validation/validation-report.json ^
+  --md-out validation/validation-report.md
 ```
 
 A passing run ends with:
@@ -132,7 +132,7 @@ A passing run ends with:
 
 ## 4. Script Usage
 
-A PowerShell helper script at `extract-mod/scripts/run-extraction.ps1` automates the
+A PowerShell helper script at `scripts/run-extraction.ps1` automates the
 build, run, and optional validation steps behind a single command.
 
 ### Parameters
@@ -140,23 +140,23 @@ build, run, and optional validation steps behind a single command.
 | Parameter | Required | Default | Description |
 |---|---|---|---|
 | `-TerrariaExe` | **Yes** | — | Full path to `Terraria.exe` |
-| `-OutputDir` | No | `extract-mod/StandaloneExtractor/Output` | Where to write the 8 output files |
+| `-OutputDir` | No | `StandaloneExtractor/Output` | Where to write the 8 output files |
 | `-Validate` | No (switch) | off | Run validation after extraction |
-| `-ValidationJsonOut` | No | `extract-mod/validation/validation-report.json` | Path for the machine-readable validation report |
-| `-ValidationMdOut` | No | `extract-mod/validation/validation-report.md` | Path for the human-readable validation report |
+| `-ValidationJsonOut` | No | `validation/validation-report.json` | Path for the machine-readable validation report |
+| `-ValidationMdOut` | No | `validation/validation-report.md` | Path for the human-readable validation report |
 
 ### Usage Examples
 
 **Basic run (default output directory):**
 
 ```powershell
-.\extract-mod\scripts\run-extraction.ps1 -TerrariaExe "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe"
+.\scripts\run-extraction.ps1 -TerrariaExe "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe"
 ```
 
 **Custom output directory:**
 
 ```powershell
-.\extract-mod\scripts\run-extraction.ps1 `
+.\scripts\run-extraction.ps1 `
   -TerrariaExe "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe" `
   -OutputDir "C:\MyData\terraria-extract"
 ```
@@ -164,7 +164,7 @@ build, run, and optional validation steps behind a single command.
 **With validation:**
 
 ```powershell
-.\extract-mod\scripts\run-extraction.ps1 `
+.\scripts\run-extraction.ps1 `
   -TerrariaExe "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe" `
   -Validate
 ```
@@ -172,7 +172,7 @@ build, run, and optional validation steps behind a single command.
 **Custom validation report paths:**
 
 ```powershell
-.\extract-mod\scripts\run-extraction.ps1 `
+.\scripts\run-extraction.ps1 `
   -TerrariaExe "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe" `
   -Validate `
   -ValidationJsonOut "C:\MyData\report.json" `
@@ -195,7 +195,7 @@ build, run, and optional validation steps behind a single command.
 By default, all output files go to:
 
 ```
-extract-mod/StandaloneExtractor/Output/
+StandaloneExtractor/Output/
 ```
 
 You can override this with `--output <path>` (manual run) or `-OutputDir` (script).
@@ -320,21 +320,21 @@ After extraction, run the validator to confirm the output files are complete and
 ### Command
 
 ```
-python extract-mod/validation/run_validation.py ^
-  --output-dir extract-mod/StandaloneExtractor/Output ^
-  --json-out extract-mod/validation/validation-report.json ^
-  --md-out extract-mod/validation/validation-report.md
+python validation/run_validation.py ^
+  --output-dir StandaloneExtractor/Output ^
+  --json-out validation/validation-report.json ^
+  --md-out validation/validation-report.md
 ```
 
-Replace `extract-mod/StandaloneExtractor/Output` with your actual output directory if you
+Replace `StandaloneExtractor/Output` with your actual output directory if you
 used a custom path.
 
 ### What a passing run looks like
 
 ```
-[validation] starting validation: output_dir=extract-mod\StandaloneExtractor\Output
-[validation] wrote json report: extract-mod\validation\validation-report.json
-[validation] wrote markdown report: extract-mod\validation\validation-report.md
+[validation] starting validation: output_dir=StandaloneExtractor\Output
+[validation] wrote json report: validation\validation-report.json
+[validation] wrote markdown report: validation\validation-report.md
 [validation] status=PASS
 ```
 
@@ -395,14 +395,14 @@ Steam location).
 **Fix:** Pass the explicit path using `--terraria`:
 
 ```
-dotnet run --project extract-mod/StandaloneExtractor/StandaloneExtractor.csproj -- ^
+dotnet run --project StandaloneExtractor/StandaloneExtractor.csproj -- ^
   --terraria "D:\Games\Terraria\Terraria.exe"
 ```
 
 Or use `--terraria-dir` if you only know the folder:
 
 ```
-dotnet run --project extract-mod/StandaloneExtractor/StandaloneExtractor.csproj -- ^
+dotnet run --project StandaloneExtractor/StandaloneExtractor.csproj -- ^
   --terraria-dir "D:\Games\Terraria"
 ```
 
@@ -422,7 +422,7 @@ Things to check:
 2. Verify game files in Steam (see above).
 3. Look at the per-phase log files in:
    ```
-   extract-mod/StandaloneExtractor/Output/_runtime/phase-results/<phase>.json
+   StandaloneExtractor/Output/_runtime/phase-results/<phase>.json
    ```
    Each file contains a `Succeeded` flag and any `Error` messages from that phase.
 
@@ -436,7 +436,7 @@ and must load x86 versions of Terraria's assemblies.
 **Fix:** Run the pre-built x86 binary directly instead of using `dotnet run`:
 
 ```
-extract-mod\StandaloneExtractor\bin\Debug\net48\StandaloneExtractor.exe ^
+StandaloneExtractor\bin\Debug\net48\StandaloneExtractor.exe ^
   --terraria "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe"
 ```
 
@@ -451,7 +451,7 @@ Do not use the 64-bit version of the .NET runtime to launch the extractor explic
 Each extraction phase runs in an isolated worker process and writes a result file:
 
 ```
-extract-mod/StandaloneExtractor/Output/_runtime/phase-results/
+StandaloneExtractor/Output/_runtime/phase-results/
   items.json
   shimmer.json
   recipes.json
@@ -483,7 +483,7 @@ Terraria installation.
 Yes. Pass `--terraria <path>` or `-t <path>` with the full path to `Terraria.exe`:
 
 ```
-dotnet run --project extract-mod/StandaloneExtractor/StandaloneExtractor.csproj -- ^
+dotnet run --project StandaloneExtractor/StandaloneExtractor.csproj -- ^
   --terraria "E:\SteamLibrary\steamapps\common\Terraria\Terraria.exe"
 ```
 
@@ -496,9 +496,9 @@ previous output, copy it to a different folder before re-running, or use `--outp
 specify a different output directory:
 
 ```
-dotnet run --project extract-mod/StandaloneExtractor/StandaloneExtractor.csproj -- ^
+dotnet run --project StandaloneExtractor/StandaloneExtractor.csproj -- ^
   --terraria "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe" ^
-  --output "extract-mod/StandaloneExtractor/Output-v2"
+  --output "StandaloneExtractor/Output-v2"
 ```
 
 ---
@@ -518,7 +518,7 @@ versions because the shimmer system and many item IDs did not exist then.
 Pass `--output <path>` or `-o <path>` to the extractor:
 
 ```
-dotnet run --project extract-mod/StandaloneExtractor/StandaloneExtractor.csproj -- ^
+dotnet run --project StandaloneExtractor/StandaloneExtractor.csproj -- ^
   --terraria "C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe" ^
   --output "C:\MyProjects\terraria-data"
 ```

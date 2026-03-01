@@ -489,7 +489,7 @@ namespace StandaloneExtractor
                 }
                 else
                 {
-                    diagnostics.Add("decompiled fallback libraries not found; run A1 decompilation to populate extract-mod/decompiled.");
+                    diagnostics.Add("decompiled fallback libraries not found; run A1 decompilation to populate decompiled/.");
                 }
 
                 diagnostics.Add("if needed, pass --terraria <path-to-Terraria.exe> explicitly.");
@@ -1262,7 +1262,7 @@ namespace StandaloneExtractor
             Console.WriteLine("Output directory: " + outputDirectory);
             Console.WriteLine("Phases passed: " + successCount + "/" + phaseResults.Count + ", failed: " + failureCount);
             Console.WriteLine("Expected output files: 8");
-            Console.WriteLine("Troubleshooting guide: extract-mod/troubleshooting.md");
+            Console.WriteLine("Troubleshooting guide: README.md#7-troubleshooting");
             Console.WriteLine("========================================");
         }
 

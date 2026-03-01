@@ -24,6 +24,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
+# Generated validation reports
+/validation/validation-report*.json
+/validation/validation-report*.md
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

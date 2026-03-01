@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Automates the build, extraction, and (optionally) validation steps described in
-    extract-mod/docs/EXTRACTION_GUIDE.md. Each stage prints a clear banner so you can
+    README.md. Each stage prints a clear banner so you can
     follow progress. Exits non-zero on build failure or extraction failure.
 
 .PARAMETER TerrariaExe
@@ -13,7 +13,7 @@
 
 .PARAMETER OutputDir
     Optional. Directory where JSON and CSV output files are written.
-    Default: extract-mod/StandaloneExtractor/Output (relative to the repo root).
+    Default: StandaloneExtractor/Output (relative to the repo root).
 
 .PARAMETER Validate
     Switch. When set, runs the Python validator after extraction and exits non-zero
@@ -21,23 +21,23 @@
 
 .PARAMETER ValidationJsonOut
     Optional. Path for the machine-readable validation report (JSON).
-    Default: extract-mod/validation/validation-report.json
+    Default: validation/validation-report.json
 
 .PARAMETER ValidationMdOut
     Optional. Path for the human-readable validation report (Markdown).
-    Default: extract-mod/validation/validation-report.md
+    Default: validation/validation-report.md
 
 .EXAMPLE
     Basic run:
-    .\extract-mod\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe"
+    .\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe"
 
 .EXAMPLE
     Custom output directory:
-    .\extract-mod\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe" -OutputDir "C:\MyData\terraria"
+    .\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe" -OutputDir "C:\MyData\terraria"
 
 .EXAMPLE
     With validation:
-    .\extract-mod\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe" -Validate
+    .\scripts\run-extraction.ps1 -TerrariaExe "C:\...\Terraria.exe" -Validate
 
 .NOTES
     Exit codes:
@@ -67,20 +67,19 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ---------------------------------------------------------------------------
-# Resolve paths relative to the repository root (the directory that contains
-# extract-mod/). This makes the script work whether you run it from the repo
-# root or from the extract-mod/scripts folder.
+# Resolve paths relative to the repository root. This makes the script work
+# whether you run it from the repo root or from the scripts folder.
 # ---------------------------------------------------------------------------
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Walk up from the script directory to find the repo root (the folder that
-# contains extract-mod/).
+# contains StandaloneExtractor/).
 function Find-RepoRoot {
     param([string]$StartDir)
     $current = $StartDir
     while ($current -ne "") {
-        if (Test-Path (Join-Path $current "extract-mod")) {
+        if (Test-Path (Join-Path $current "StandaloneExtractor")) {
             return $current
         }
         $parent = Split-Path -Parent $current
@@ -92,23 +91,23 @@ function Find-RepoRoot {
 
 $RepoRoot = Find-RepoRoot -StartDir $ScriptDir
 if (-not $RepoRoot) {
-    Write-Error "Could not locate repo root (the folder containing extract-mod/). Run this script from inside the repository."
+    Write-Error "Could not locate repo root (the folder containing StandaloneExtractor/). Run this script from inside the repository."
     exit 1
 }
 
-$ProjectFile = Join-Path $RepoRoot "extract-mod\StandaloneExtractor\StandaloneExtractor.csproj"
-$ValidationScript = Join-Path $RepoRoot "extract-mod\validation\run_validation.py"
+$ProjectFile = Join-Path $RepoRoot "StandaloneExtractor\StandaloneExtractor.csproj"
+$ValidationScript = Join-Path $RepoRoot "validation\run_validation.py"
 
 if ($OutputDir -eq "") {
-    $OutputDir = Join-Path $RepoRoot "extract-mod\StandaloneExtractor\Output"
+    $OutputDir = Join-Path $RepoRoot "StandaloneExtractor\Output"
 }
 
 if ($ValidationJsonOut -eq "") {
-    $ValidationJsonOut = Join-Path $RepoRoot "extract-mod\validation\validation-report.json"
+    $ValidationJsonOut = Join-Path $RepoRoot "validation\validation-report.json"
 }
 
 if ($ValidationMdOut -eq "") {
-    $ValidationMdOut = Join-Path $RepoRoot "extract-mod\validation\validation-report.md"
+    $ValidationMdOut = Join-Path $RepoRoot "validation\validation-report.md"
 }
 
 # ---------------------------------------------------------------------------
@@ -186,7 +185,7 @@ if ($ExtractionExitCode -ne 0) {
     Write-Host "Check the phase logs for details:"
     Write-Host "  $OutputDir\_runtime\phase-results\"
     Write-Host ""
-    Write-Host "See extract-mod/docs/EXTRACTION_GUIDE.md section 7 (Troubleshooting) for help."
+    Write-Host "See README.md section 7 (Troubleshooting) for help."
     exit 1
 }
 
@@ -202,9 +201,9 @@ if (-not $Validate) {
     Write-Host "All phases passed."
     Write-Host ""
     Write-Host "To validate the output, re-run with -Validate, or run manually:"
-    Write-Host "  python extract-mod/validation/run_validation.py \`"
-    Write-Host "    --output-dir `"$OutputDir`" \`"
-    Write-Host "    --json-out `"$ValidationJsonOut`" \`"
+    Write-Host "  python validation/run_validation.py ^"
+    Write-Host "    --output-dir `"$OutputDir`" ^"
+    Write-Host "    --json-out `"$ValidationJsonOut`" ^"
     Write-Host "    --md-out `"$ValidationMdOut`""
     Write-Host ""
     exit 0
