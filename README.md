@@ -36,6 +36,9 @@ from the game's own data structures — no manual parsing, no web scraping.
 Each dataset is written to both a JSON file and a CSV file, giving you 10 primary output files,
 plus thousands of sprite PNG files in subdirectories.
 
+The sprite phase is optimized for throughput: it processes image assets in parallel and writes PNGs
+with a lightweight built-in encoder (instead of `System.Drawing`/GDI+).
+
 ---
 
 ## 2. Requirements

@@ -1,11 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using StandaloneExtractor.Helpers;
 using StandaloneExtractor.Models;
 
@@ -58,16 +58,23 @@ namespace StandaloneExtractor.Extractors
             int saved = 0;
             int failed = 0;
 
-            var manifestRows = new List<SpriteManifestRow>(total);
+            var manifestRows = new ConcurrentBag<SpriteManifestRow>();
+            int maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount);
 
-            foreach (SpriteAsset asset in assets)
+            Parallel.ForEach(
+                assets,
+                new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = maxDegreeOfParallelism
+                },
+                asset =>
             {
-                processed++;
                 try
                 {
                     XnbTextureData texture = XnbReader.ReadTexture2D(asset.SourcePath);
+
                     string outputPngPath = Path.Combine(asset.OutputDirectory, asset.PngFileName);
-                    SaveRgbaPng(outputPngPath, texture.Width, texture.Height, texture.RgbaPixels);
+                    PngWriter.WritePng(outputPngPath, texture.Width, texture.Height, texture.RgbaPixels);
 
                     manifestRows.Add(new SpriteManifestRow
                     {
@@ -79,21 +86,25 @@ namespace StandaloneExtractor.Extractors
                         Height = texture.Height
                     });
 
-                    saved++;
+                    Interlocked.Increment(ref saved);
                 }
                 catch (Exception ex)
                 {
-                    failed++;
+                    Interlocked.Increment(ref failed);
                     Console.WriteLine("[sprites] failed to decode " + Path.GetFileName(asset.SourcePath) + ": " + ex.Message);
                 }
 
-                if (processed % 500 == 0 || processed == total)
+                int current = Interlocked.Increment(ref processed);
+                if (current % 500 == 0 || current == total)
                 {
-                    Console.WriteLine("[sprites] progress " + processed + "/" + total + " | saved=" + saved + " | failed=" + failed);
+                    Console.WriteLine(
+                        "[sprites] progress " + current + "/" + total
+                        + " | saved=" + Volatile.Read(ref saved)
+                        + " | failed=" + Volatile.Read(ref failed));
                 }
-            }
+            });
 
-            Console.WriteLine("[sprites] extracted " + manifestRows.Count + " sprites (failed=" + failed + ")");
+            Console.WriteLine("[sprites] extracted " + manifestRows.Count + " sprites (failed=" + Volatile.Read(ref failed) + ")");
 
             return manifestRows
                 .OrderBy(row => string.Equals(row.Category, "item", StringComparison.Ordinal) ? 0 : 1)
@@ -227,66 +238,6 @@ namespace StandaloneExtractor.Extractors
             }
 
             return DefaultTerrariaExePath;
-        }
-
-        private static void SaveRgbaPng(string outputPath, int width, int height, byte[] rgbaPixels)
-        {
-            if (rgbaPixels == null)
-            {
-                throw new ArgumentNullException(nameof(rgbaPixels));
-            }
-
-            int expectedLength = checked(width * height * 4);
-            if (rgbaPixels.Length < expectedLength)
-            {
-                throw new InvalidDataException(
-                    "RGBA buffer is smaller than expected. got=" + rgbaPixels.Length + ", expected=" + expectedLength);
-            }
-
-            string outputDirectory = Path.GetDirectoryName(outputPath);
-            if (!string.IsNullOrWhiteSpace(outputDirectory))
-            {
-                Directory.CreateDirectory(outputDirectory);
-            }
-
-            using (var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
-            {
-                Rectangle rect = new Rectangle(0, 0, width, height);
-                BitmapData bitmapData = bitmap.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-                try
-                {
-                    int srcStride = width * 4;
-                    int dstStride = bitmapData.Stride;
-                    int absDstStride = Math.Abs(dstStride);
-                    IntPtr basePointer = dstStride > 0
-                        ? bitmapData.Scan0
-                        : IntPtr.Add(bitmapData.Scan0, dstStride * (height - 1));
-
-                    var rowBuffer = new byte[srcStride];
-                    for (int y = 0; y < height; y++)
-                    {
-                        int srcOffset = y * srcStride;
-                        for (int x = 0; x < width; x++)
-                        {
-                            int srcPixel = srcOffset + x * 4;
-                            int dstPixel = x * 4;
-                            rowBuffer[dstPixel] = rgbaPixels[srcPixel + 2];
-                            rowBuffer[dstPixel + 1] = rgbaPixels[srcPixel + 1];
-                            rowBuffer[dstPixel + 2] = rgbaPixels[srcPixel];
-                            rowBuffer[dstPixel + 3] = rgbaPixels[srcPixel + 3];
-                        }
-
-                        IntPtr rowPointer = IntPtr.Add(basePointer, y * absDstStride);
-                        Marshal.Copy(rowBuffer, 0, rowPointer, srcStride);
-                    }
-                }
-                finally
-                {
-                    bitmap.UnlockBits(bitmapData);
-                }
-
-                bitmap.Save(outputPath, ImageFormat.Png);
-            }
         }
 
         private sealed class SpriteAsset
