@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using CommandLine;
 
 namespace StandaloneExtractor
 {
@@ -10,6 +11,27 @@ namespace StandaloneExtractor
     {
         internal const string WorkerPhaseArgument = "--worker-phase";
         internal const string PhaseResultArgument = "--phase-result";
+
+        private sealed class CliOptions
+        {
+            [Option('o', "output")]
+            public string OutputDirectory { get; set; }
+
+            [Option('t', "terraria")]
+            public string TerrariaPath { get; set; }
+
+            [Option("terraria-dir")]
+            public string TerrariaDirectory { get; set; }
+
+            [Option("worker-phase")]
+            public string WorkerPhase { get; set; }
+
+            [Option("phase-result")]
+            public string PhaseResultPath { get; set; }
+
+            [Option('h', "help")]
+            public bool Help { get; set; }
+        }
 
         internal static readonly PhaseDefinition[] OrderedPhases =
         {
@@ -22,14 +44,17 @@ namespace StandaloneExtractor
 
         private static int Main(string[] args)
         {
-            if (HasHelpFlag(args))
+            string[] sanitizedArgs = NormalizeHelpAliases(args);
+            CliOptions parsedOptions = ParseCliOptions(sanitizedArgs);
+
+            if (parsedOptions.Help)
             {
                 PrintHelp();
                 return 0;
             }
 
-            string[] normalizedArgs = NormalizeArguments(args);
-            if (HasWorkerFlag(normalizedArgs))
+            string[] normalizedArgs = NormalizeArguments(sanitizedArgs, parsedOptions);
+            if (IsWorkerInvocation(normalizedArgs, parsedOptions))
             {
                 return WorkerRunner.RunWorker(normalizedArgs);
             }
@@ -101,16 +126,53 @@ namespace StandaloneExtractor
             return currentDirectory;
         }
 
-        private static bool HasWorkerFlag(IList<string> args)
+        private static bool IsWorkerInvocation(IList<string> args, CliOptions options)
         {
-            return args.Any(arg => string.Equals(arg, WorkerPhaseArgument, StringComparison.OrdinalIgnoreCase));
+            return !string.IsNullOrWhiteSpace(options.WorkerPhase)
+                || args.Any(arg => string.Equals(arg, WorkerPhaseArgument, StringComparison.OrdinalIgnoreCase));
         }
 
-        private static bool HasHelpFlag(string[] args)
+        private static string[] NormalizeHelpAliases(string[] args)
         {
-            return args.Any(arg => string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arg, "-h", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arg, "/?", StringComparison.OrdinalIgnoreCase));
+            if (args == null || args.Length == 0)
+            {
+                return new string[0];
+            }
+
+            return args
+                .Select(arg => string.Equals(arg, "/?", StringComparison.OrdinalIgnoreCase) ? "--help" : arg)
+                .ToArray();
+        }
+
+        private static CliOptions ParseCliOptions(string[] args)
+        {
+            var parser = new Parser(settings =>
+            {
+                settings.IgnoreUnknownArguments = true;
+                settings.HelpWriter = null;
+            });
+
+            CliOptions parsed = null;
+            parser
+                .ParseArguments<CliOptions>(args ?? new string[0])
+                .WithParsed(options => parsed = options);
+
+            if (parsed != null)
+            {
+                return parsed;
+            }
+
+            IList<string> fallbackArgs = args ?? new string[0];
+            return new CliOptions
+            {
+                OutputDirectory = GetArgumentValue(fallbackArgs, "--output", "-o"),
+                TerrariaPath = GetArgumentValue(fallbackArgs, "--terraria", "-t"),
+                TerrariaDirectory = GetArgumentValue(fallbackArgs, "--terraria-dir"),
+                WorkerPhase = GetArgumentValue(fallbackArgs, WorkerPhaseArgument),
+                PhaseResultPath = GetArgumentValue(fallbackArgs, PhaseResultArgument),
+                Help = fallbackArgs.Any(arg => string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(arg, "-h", StringComparison.OrdinalIgnoreCase))
+            };
         }
 
         private static void PrintHelp()
@@ -126,11 +188,11 @@ namespace StandaloneExtractor
             Console.WriteLine("  --help, -h, /? Show this help text.");
         }
 
-        private static string[] NormalizeArguments(string[] args)
+        private static string[] NormalizeArguments(string[] args, CliOptions parsedOptions)
         {
             var normalized = new List<string>(args ?? new string[0]);
-            string terrariaPath = GetArgumentValue(normalized, "--terraria", "-t");
-            string terrariaDirectory = GetArgumentValue(normalized, "--terraria-dir");
+            string terrariaPath = parsedOptions.TerrariaPath;
+            string terrariaDirectory = parsedOptions.TerrariaDirectory;
 
             if (!string.IsNullOrWhiteSpace(terrariaPath) && string.IsNullOrWhiteSpace(terrariaDirectory))
             {

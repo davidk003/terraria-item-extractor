@@ -8,6 +8,8 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using CsvHelper;
+using CsvHelper.Configuration;
+using CsvHelper.TypeConversion;
 using Newtonsoft.Json;
 
 namespace StandaloneExtractor
@@ -28,27 +30,36 @@ namespace StandaloneExtractor
             Directory.CreateDirectory(outputDirectory);
             string filePath = Path.Combine(outputDirectory, fileName);
             List<T> materializedRows = rows == null ? new List<T>() : rows.ToList();
-            PropertyInfo[] properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
             using (var streamWriter = new StreamWriter(filePath, false))
             using (var csvWriter = new CsvWriter(streamWriter, CultureInfo.InvariantCulture))
             {
-                foreach (PropertyInfo property in properties)
+                RegisterEnumerableConverters<T>(csvWriter);
+
+                if (materializedRows.Count == 0)
                 {
-                    csvWriter.WriteField(property.Name);
-                }
-
-                csvWriter.NextRecord();
-
-                foreach (T row in materializedRows)
-                {
-                    foreach (PropertyInfo property in properties)
-                    {
-                        csvWriter.WriteField(ToCsvCell(property.GetValue(row, null)));
-                    }
-
+                    csvWriter.WriteHeader<T>();
                     csvWriter.NextRecord();
+                    return;
                 }
+
+                csvWriter.WriteRecords(materializedRows);
+            }
+        }
+
+        private static void RegisterEnumerableConverters<T>(CsvWriter csvWriter)
+        {
+            PropertyInfo[] properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            foreach (PropertyInfo property in properties)
+            {
+                Type propertyType = property.PropertyType;
+                if (propertyType == typeof(string)
+                    || !typeof(IEnumerable).IsAssignableFrom(propertyType))
+                {
+                    continue;
+                }
+
+                csvWriter.Context.TypeConverterCache.AddConverter(propertyType, EnumerableJoinConverter.Instance);
             }
         }
 
@@ -72,6 +83,16 @@ namespace StandaloneExtractor
             }
 
             return Convert.ToString(value, CultureInfo.InvariantCulture);
+        }
+
+        private sealed class EnumerableJoinConverter : DefaultTypeConverter
+        {
+            internal static readonly EnumerableJoinConverter Instance = new EnumerableJoinConverter();
+
+            public override string ConvertToString(object value, IWriterRow row, MemberMapData memberMapData)
+            {
+                return ToCsvCell(value);
+            }
         }
     }
 
