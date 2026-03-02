@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 
-namespace StandaloneExtractor.Helpers
+namespace StandaloneExtractor
 {
     // This implementation is based on the MonoGame/libmspack LZX decoder lineage.
     public sealed class LzxDecoder

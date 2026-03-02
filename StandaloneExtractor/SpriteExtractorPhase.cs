@@ -6,15 +6,11 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using StandaloneExtractor.Helpers;
-using StandaloneExtractor.Models;
 
-namespace StandaloneExtractor.Extractors
+namespace StandaloneExtractor
 {
     public sealed class SpriteExtractorPhase : IExtractorPhase<SpriteManifestRow>
     {
-        private const string DefaultTerrariaExePath = @"C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe";
-
         public string PhaseName
         {
             get { return "sprites"; }
@@ -22,15 +18,7 @@ namespace StandaloneExtractor.Extractors
 
         public IEnumerable<SpriteManifestRow> Extract(ExtractionContext context)
         {
-            string terrariaExePath = ResolveTerrariaPath(context == null ? null : context.CommandLineArgs);
-            if (!File.Exists(terrariaExePath))
-            {
-                Console.WriteLine("[sprites] Terraria.exe not found: " + terrariaExePath);
-                return new List<SpriteManifestRow>();
-            }
-
-            string terrariaDirectory = Path.GetDirectoryName(terrariaExePath) ?? string.Empty;
-            string imagesDirectory = Path.Combine(terrariaDirectory, "Content", "Images");
+            string imagesDirectory = Path.Combine(context.TerrariaDirectory, "Content", "Images");
             if (!Directory.Exists(imagesDirectory))
             {
                 Console.WriteLine("[sprites] Content/Images directory not found: " + imagesDirectory);
@@ -212,32 +200,6 @@ namespace StandaloneExtractor.Extractors
                 Console.WriteLine("[sprites] warning: failed to read items.json internal names: " + ex.Message);
                 return new Dictionary<int, string>();
             }
-        }
-
-        private static string ResolveTerrariaPath(IList<string> args)
-        {
-            if (args != null)
-            {
-                for (int i = 0; i < args.Count; i++)
-                {
-                    if ((string.Equals(args[i], "--terraria", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(args[i], "-t", StringComparison.OrdinalIgnoreCase))
-                        && i + 1 < args.Count
-                        && !string.IsNullOrWhiteSpace(args[i + 1]))
-                    {
-                        return Path.GetFullPath(args[i + 1]);
-                    }
-
-                    if (string.Equals(args[i], "--terraria-dir", StringComparison.OrdinalIgnoreCase)
-                        && i + 1 < args.Count
-                        && !string.IsNullOrWhiteSpace(args[i + 1]))
-                    {
-                        return Path.Combine(Path.GetFullPath(args[i + 1]), "Terraria.exe");
-                    }
-                }
-            }
-
-            return DefaultTerrariaExePath;
         }
 
         private sealed class SpriteAsset

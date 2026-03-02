@@ -7,18 +7,15 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
-using StandaloneExtractor.Models;
 
-namespace StandaloneExtractor.Extractors
+namespace StandaloneExtractor
 {
     public sealed class NpcShopDataExtractor : IExtractorPhase<NpcShopRow>
     {
-        private const string DefaultTerrariaExePath = @"C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe";
         private const int TravelShopSamplingRuns = 200;
         private static readonly Regex IfRegex = new Regex(@"^(?:else\s+)?if\s*\((.+)\)", RegexOptions.Compiled);
         private static readonly Regex CaseRegex = new Regex(@"^case\s+(\d+)\s*:", RegexOptions.Compiled);
         private static readonly Regex SetDefaultsRegex = new Regex(@"\.SetDefaults\((\d+)\)", RegexOptions.Compiled);
-        private static readonly Dictionary<ushort, OpCode> OpCodeByValue = BuildOpCodeByValueMap();
 
         public string PhaseName
         {
@@ -27,21 +24,10 @@ namespace StandaloneExtractor.Extractors
 
         public IEnumerable<NpcShopRow> Extract(ExtractionContext context)
         {
-            string terrariaExePath = ResolveTerrariaExePath(context.CommandLineArgs);
-            if (!File.Exists(terrariaExePath))
+            Assembly terrariaAssembly = context.TerrariaAssembly;
+            if (terrariaAssembly == null)
             {
-                Console.WriteLine("[npc-shops] Terraria.exe not found: " + terrariaExePath);
-                return new List<NpcShopRow>();
-            }
-
-            Assembly terrariaAssembly;
-            try
-            {
-                terrariaAssembly = LoadTerrariaAssembly(terrariaExePath);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine("[npc-shops] Failed to load Terraria assembly: " + ex.Message);
+                Console.WriteLine("[npc-shops] Terraria assembly was not loaded.");
                 return new List<NpcShopRow>();
             }
 
@@ -71,6 +57,8 @@ namespace StandaloneExtractor.Extractors
             Console.WriteLine("[npc-shops] Extracted " + shops.Count + " shops and " + totalItemRows + " items");
             return shops;
         }
+
+        // === Shop Extraction ===
 
         private static NpcShopRow ExtractShop(
             ShopMapping mapping,
@@ -137,7 +125,7 @@ namespace StandaloneExtractor.Extractors
                     row = new NpcShopItemRow
                     {
                         ItemId = itemId,
-                        Name = ResolveItemName(runtime, item, itemId),
+                        Name = runtime.GetItemName(itemId),
                         BuyPrice = (int)runtime.ItemGetStoreValueMethod.Invoke(item, null)
                     };
                     itemsById[itemId] = row;
@@ -159,11 +147,13 @@ namespace StandaloneExtractor.Extractors
             return new NpcShopRow
             {
                 NpcId = mapping.NpcId,
-                NpcName = ResolveNpcName(runtime, mapping.NpcId),
+                NpcName = runtime.GetNpcName(mapping.NpcId),
                 ShopName = mapping.ShopName,
                 Items = itemsById.Values.OrderBy(i => i.ItemId).ToList()
             };
         }
+
+        // === Travel Shop Sampling ===
 
         private static NpcShopRow ExtractTravelShop(ShopMapping mapping, TerrariaRuntime runtime)
         {
@@ -173,7 +163,7 @@ namespace StandaloneExtractor.Extractors
                 return new NpcShopRow
                 {
                     NpcId = mapping.NpcId,
-                    NpcName = ResolveNpcName(runtime, mapping.NpcId),
+                    NpcName = runtime.GetNpcName(mapping.NpcId),
                     ShopName = mapping.ShopName,
                     Items = new List<NpcShopItemRow>()
                 };
@@ -243,7 +233,7 @@ namespace StandaloneExtractor.Extractors
                 items.Add(new NpcShopItemRow
                 {
                     ItemId = itemId,
-                    Name = ResolveItemName(runtime, item, itemId),
+                    Name = runtime.GetItemName(itemId),
                     BuyPrice = (int)runtime.ItemGetStoreValueMethod.Invoke(item, null)
                 });
             }
@@ -253,11 +243,13 @@ namespace StandaloneExtractor.Extractors
             return new NpcShopRow
             {
                 NpcId = mapping.NpcId,
-                NpcName = ResolveNpcName(runtime, mapping.NpcId),
+                NpcName = runtime.GetNpcName(mapping.NpcId),
                 ShopName = mapping.ShopName,
                 Items = items
             };
         }
+
+        // === Zoologist IL Fallback ===
 
         private static NpcShopRow ExtractZoologistShopFromSetupShopIL(ShopMapping mapping, TerrariaRuntime runtime)
         {
@@ -277,7 +269,7 @@ namespace StandaloneExtractor.Extractors
                 items.Add(new NpcShopItemRow
                 {
                     ItemId = itemId,
-                    Name = ResolveItemName(runtime, item, itemId),
+                    Name = runtime.GetItemName(itemId),
                     BuyPrice = (int)runtime.ItemGetStoreValueMethod.Invoke(item, null)
                 });
             }
@@ -285,7 +277,7 @@ namespace StandaloneExtractor.Extractors
             return new NpcShopRow
             {
                 NpcId = mapping.NpcId,
-                NpcName = ResolveNpcName(runtime, mapping.NpcId),
+                NpcName = runtime.GetNpcName(mapping.NpcId),
                 ShopName = mapping.ShopName,
                 Items = items
             };
@@ -298,7 +290,7 @@ namespace StandaloneExtractor.Extractors
                 return;
             }
 
-            List<IlInstruction> instructions = ParseIlInstructions(runtime.SetupShopMethod);
+            List<IlInstruction> instructions = IlParser.ParseIlInstructions(runtime.SetupShopMethod);
             if (instructions.Count == 0)
             {
                 return;
@@ -332,7 +324,7 @@ namespace StandaloneExtractor.Extractors
                 }
 
                 int itemId;
-                if (!TryFindClosestIntConstant(instructions, i, caseStart, out itemId))
+                if (!IlParser.TryFindClosestIntConstant(instructions, i, caseStart, out itemId))
                 {
                     continue;
                 }
@@ -387,18 +379,18 @@ namespace StandaloneExtractor.Extractors
 
             int bestiaryToken = bestiaryMethod.MetadataToken;
             int callOffset;
-            if (!TryFindMethodCallOffset(instructions, bestiaryToken, out callOffset))
+            if (!IlParser.TryFindMethodCallOffset(instructions, bestiaryToken, out callOffset))
             {
                 return false;
             }
 
-            if (TryResolveCaseRangeByTypeComparison(instructions, il.Length, 23, callOffset, out caseStart, out caseEnd))
+            if (IlParser.TryResolveCaseRangeByTypeComparison(instructions, il.Length, 23, callOffset, out caseStart, out caseEnd))
             {
                 return true;
             }
 
             int switchInstructionIndex;
-            IlInstruction switchInstruction = FindPrimarySwitchInstruction(instructions, out switchInstructionIndex);
+            IlInstruction switchInstruction = IlParser.FindPrimarySwitchInstruction(instructions, out switchInstructionIndex);
             if (switchInstruction == null)
             {
                 return false;
@@ -406,7 +398,7 @@ namespace StandaloneExtractor.Extractors
 
             int directCaseStart;
             int directCaseEnd;
-            if (TryResolveSwitchCaseRangeByTypeValue(instructions, switchInstructionIndex, switchInstruction, il.Length, 23, out directCaseStart, out directCaseEnd)
+            if (IlParser.TryResolveSwitchCaseRangeByTypeValue(instructions, switchInstructionIndex, switchInstruction, il.Length, 23, out directCaseStart, out directCaseEnd)
                 && callOffset >= directCaseStart
                 && callOffset < directCaseEnd)
             {
@@ -443,428 +435,6 @@ namespace StandaloneExtractor.Extractors
             return false;
         }
 
-        private static IlInstruction FindPrimarySwitchInstruction(List<IlInstruction> instructions, out int switchInstructionIndex)
-        {
-            for (int i = 0; i < instructions.Count; i++)
-            {
-                IlInstruction instruction = instructions[i];
-                if (instruction.OpCode.Value == OpCodes.Switch.Value
-                    && instruction.SwitchTargets != null
-                    && instruction.SwitchTargets.Length > 0)
-                {
-                    switchInstructionIndex = i;
-                    return instruction;
-                }
-            }
-
-            switchInstructionIndex = -1;
-            return null;
-        }
-
-        private static bool TryResolveSwitchCaseRangeByTypeValue(
-            List<IlInstruction> instructions,
-            int switchInstructionIndex,
-            IlInstruction switchInstruction,
-            int ilLength,
-            int typeValue,
-            out int caseStart,
-            out int caseEnd)
-        {
-            caseStart = 0;
-            caseEnd = 0;
-
-            if (switchInstruction == null || switchInstruction.SwitchTargets == null || switchInstruction.SwitchTargets.Length == 0)
-            {
-                return false;
-            }
-
-            int caseBase = 0;
-            TryResolveSwitchCaseBase(instructions, switchInstructionIndex, out caseBase);
-
-            int switchIndex = typeValue - caseBase;
-            if (switchIndex < 0 || switchIndex >= switchInstruction.SwitchTargets.Length)
-            {
-                return false;
-            }
-
-            int start = switchInstruction.SwitchTargets[switchIndex];
-            if (start < 0 || start >= ilLength)
-            {
-                return false;
-            }
-
-            int[] orderedTargets = switchInstruction.SwitchTargets
-                .Where(target => target >= 0 && target < ilLength)
-                .Distinct()
-                .OrderBy(target => target)
-                .ToArray();
-            if (orderedTargets.Length == 0)
-            {
-                return false;
-            }
-
-            int nextBoundary = ilLength;
-            foreach (int target in orderedTargets)
-            {
-                if (target > start)
-                {
-                    nextBoundary = target;
-                    break;
-                }
-            }
-
-            caseStart = start;
-            caseEnd = nextBoundary;
-            return true;
-        }
-
-        private static bool TryResolveSwitchCaseBase(List<IlInstruction> instructions, int switchInstructionIndex, out int caseBase)
-        {
-            caseBase = 0;
-            if (instructions == null || switchInstructionIndex <= 0)
-            {
-                return false;
-            }
-
-            int lowerBound = Math.Max(0, switchInstructionIndex - 8);
-            for (int i = switchInstructionIndex - 1; i >= lowerBound; i--)
-            {
-                short opcode = instructions[i].OpCode.Value;
-                if (opcode != OpCodes.Sub.Value && opcode != OpCodes.Sub_Ovf.Value && opcode != OpCodes.Sub_Ovf_Un.Value)
-                {
-                    continue;
-                }
-
-                if (i - 1 < 0)
-                {
-                    continue;
-                }
-
-                int value;
-                if (TryGetLdcI4Value(instructions[i - 1], out value))
-                {
-                    caseBase = value;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool TryFindMethodCallOffset(List<IlInstruction> instructions, int methodToken, out int offset)
-        {
-            foreach (IlInstruction instruction in instructions)
-            {
-                short opcode = instruction.OpCode.Value;
-                if (opcode != OpCodes.Call.Value && opcode != OpCodes.Callvirt.Value)
-                {
-                    continue;
-                }
-
-                if (!instruction.Int32Operand.HasValue || instruction.Int32Operand.Value != methodToken)
-                {
-                    continue;
-                }
-
-                offset = instruction.Offset;
-                return true;
-            }
-
-            offset = -1;
-            return false;
-        }
-
-        private static bool TryResolveCaseRangeByTypeComparison(
-            List<IlInstruction> instructions,
-            int ilLength,
-            int typeValue,
-            int requiredOffset,
-            out int caseStart,
-            out int caseEnd)
-        {
-            caseStart = 0;
-            caseEnd = 0;
-
-            for (int i = 0; i < instructions.Count; i++)
-            {
-                int value;
-                if (!TryGetLdcI4Value(instructions[i], out value) || value != typeValue)
-                {
-                    continue;
-                }
-
-                int branchIndexLimit = Math.Min(instructions.Count - 1, i + 3);
-                for (int branchIndex = i + 1; branchIndex <= branchIndexLimit; branchIndex++)
-                {
-                    IlInstruction branchInstruction = instructions[branchIndex];
-                    if (!branchInstruction.BranchTarget.HasValue)
-                    {
-                        continue;
-                    }
-
-                    int branchTarget = branchInstruction.BranchTarget.Value;
-                    if (branchTarget < 0 || branchTarget > ilLength)
-                    {
-                        continue;
-                    }
-
-                    short opcode = branchInstruction.OpCode.Value;
-                    if (opcode != OpCodes.Bne_Un.Value
-                        && opcode != OpCodes.Bne_Un_S.Value
-                        && opcode != OpCodes.Brfalse.Value
-                        && opcode != OpCodes.Brfalse_S.Value)
-                    {
-                        continue;
-                    }
-
-                    int fallthroughStart = branchIndex + 1 < instructions.Count
-                        ? instructions[branchIndex + 1].Offset
-                        : ilLength;
-                    if (branchTarget <= fallthroughStart)
-                    {
-                        continue;
-                    }
-
-                    if (requiredOffset < fallthroughStart || requiredOffset >= branchTarget)
-                    {
-                        continue;
-                    }
-
-                    caseStart = fallthroughStart;
-                    caseEnd = branchTarget;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool TryFindClosestIntConstant(List<IlInstruction> instructions, int fromIndex, int lowerBoundOffset, out int value)
-        {
-            value = 0;
-            int maxBacktrack = 12;
-            int minIndex = Math.Max(0, fromIndex - maxBacktrack);
-            for (int i = fromIndex - 1; i >= minIndex; i--)
-            {
-                IlInstruction candidate = instructions[i];
-                if (candidate.Offset < lowerBoundOffset)
-                {
-                    break;
-                }
-
-                if (TryGetLdcI4Value(candidate, out value))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static bool TryGetLdcI4Value(IlInstruction instruction, out int value)
-        {
-            switch (instruction.OpCode.Value)
-            {
-                case 0x15:
-                    value = -1;
-                    return true;
-                case 0x16:
-                    value = 0;
-                    return true;
-                case 0x17:
-                    value = 1;
-                    return true;
-                case 0x18:
-                    value = 2;
-                    return true;
-                case 0x19:
-                    value = 3;
-                    return true;
-                case 0x1A:
-                    value = 4;
-                    return true;
-                case 0x1B:
-                    value = 5;
-                    return true;
-                case 0x1C:
-                    value = 6;
-                    return true;
-                case 0x1D:
-                    value = 7;
-                    return true;
-                case 0x1E:
-                    value = 8;
-                    return true;
-                case 0x1F:
-                case 0x20:
-                    if (instruction.Int32Operand.HasValue)
-                    {
-                        value = instruction.Int32Operand.Value;
-                        return true;
-                    }
-
-                    break;
-            }
-
-            value = 0;
-            return false;
-        }
-
-        private static List<IlInstruction> ParseIlInstructions(MethodInfo method)
-        {
-            var instructions = new List<IlInstruction>();
-            MethodBody methodBody = method.GetMethodBody();
-            if (methodBody == null)
-            {
-                return instructions;
-            }
-
-            byte[] il = methodBody.GetILAsByteArray();
-            if (il == null || il.Length == 0)
-            {
-                return instructions;
-            }
-
-            int i = 0;
-            while (i < il.Length)
-            {
-                int offset = i;
-                ushort opcodeValue = il[i++];
-                if (opcodeValue == 0xFE)
-                {
-                    if (i >= il.Length)
-                    {
-                        break;
-                    }
-
-                    opcodeValue = (ushort)(0xFE00 | il[i++]);
-                }
-
-                OpCode opcode;
-                if (!OpCodeByValue.TryGetValue(opcodeValue, out opcode))
-                {
-                    break;
-                }
-
-                int operandStart = i;
-                int operandSize = GetOperandSize(opcode.OperandType, il, operandStart);
-                if (operandSize < 0 || operandStart + operandSize > il.Length)
-                {
-                    break;
-                }
-
-                int? int32Operand = null;
-                int? branchTarget = null;
-                int[] switchTargets = null;
-                if (opcode.OperandType == OperandType.ShortInlineI)
-                {
-                    int32Operand = unchecked((sbyte)il[operandStart]);
-                }
-                else if (opcode.OperandType == OperandType.ShortInlineBrTarget)
-                {
-                    int relativeTarget = unchecked((sbyte)il[operandStart]);
-                    int nextOffset = operandStart + operandSize;
-                    branchTarget = nextOffset + relativeTarget;
-                }
-                else if (opcode.OperandType == OperandType.InlineI
-                    || opcode.OperandType == OperandType.InlineMethod
-                    || opcode.OperandType == OperandType.InlineField
-                    || opcode.OperandType == OperandType.InlineType
-                    || opcode.OperandType == OperandType.InlineTok
-                    || opcode.OperandType == OperandType.InlineString
-                    || opcode.OperandType == OperandType.InlineSig)
-                {
-                    int32Operand = BitConverter.ToInt32(il, operandStart);
-                }
-                else if (opcode.OperandType == OperandType.InlineBrTarget)
-                {
-                    int relativeTarget = BitConverter.ToInt32(il, operandStart);
-                    int nextOffset = operandStart + operandSize;
-                    branchTarget = nextOffset + relativeTarget;
-                }
-                else if (opcode.OperandType == OperandType.InlineSwitch)
-                {
-                    int count = BitConverter.ToInt32(il, operandStart);
-                    switchTargets = new int[count];
-                    int tableStart = operandStart + 4;
-                    int nextOffset = operandStart + operandSize;
-                    for (int index = 0; index < count; index++)
-                    {
-                        int relativeTarget = BitConverter.ToInt32(il, tableStart + index * 4);
-                        switchTargets[index] = nextOffset + relativeTarget;
-                    }
-                }
-
-                instructions.Add(new IlInstruction
-                {
-                    Offset = offset,
-                    OpCode = opcode,
-                    Int32Operand = int32Operand,
-                    BranchTarget = branchTarget,
-                    SwitchTargets = switchTargets
-                });
-
-                i += operandSize;
-            }
-
-            return instructions;
-        }
-
-        private static int GetOperandSize(OperandType operandType, byte[] il, int operandStart)
-        {
-            switch (operandType)
-            {
-                case OperandType.InlineNone:
-                    return 0;
-                case OperandType.ShortInlineBrTarget:
-                case OperandType.ShortInlineI:
-                case OperandType.ShortInlineVar:
-                    return 1;
-                case OperandType.InlineVar:
-                    return 2;
-                case OperandType.InlineBrTarget:
-                case OperandType.InlineField:
-                case OperandType.InlineI:
-                case OperandType.InlineMethod:
-                case OperandType.InlineSig:
-                case OperandType.InlineString:
-                case OperandType.InlineTok:
-                case OperandType.InlineType:
-                case OperandType.ShortInlineR:
-                    return 4;
-                case OperandType.InlineI8:
-                case OperandType.InlineR:
-                    return 8;
-                case OperandType.InlineSwitch:
-                    if (operandStart + 4 > il.Length)
-                    {
-                        return -1;
-                    }
-
-                    int count = BitConverter.ToInt32(il, operandStart);
-                    return 4 + count * 4;
-                default:
-                    return -1;
-            }
-        }
-
-        private static Dictionary<ushort, OpCode> BuildOpCodeByValueMap()
-        {
-            var map = new Dictionary<ushort, OpCode>();
-            foreach (FieldInfo field in typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static))
-            {
-                if (field.FieldType != typeof(OpCode))
-                {
-                    continue;
-                }
-
-                var opcode = (OpCode)field.GetValue(null);
-                map[unchecked((ushort)opcode.Value)] = opcode;
-            }
-
-            return map;
-        }
-
         private static void PopulateTravelShopByMethodConstants(TerrariaRuntime runtime, HashSet<int> destination)
         {
             const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
@@ -879,7 +449,7 @@ namespace StandaloneExtractor.Extractors
 
             foreach (MethodInfo method in travelMethods)
             {
-                foreach (int value in ExtractIntConstantsFromMethodBody(method))
+                foreach (int value in IlParser.ExtractIntConstantsFromMethodBody(method))
                 {
                     if (!IsLikelyTravelShopItemId(value, runtime.ItemIdCount))
                     {
@@ -904,74 +474,6 @@ namespace StandaloneExtractor.Extractors
             }
 
             return itemId >= 1000;
-        }
-
-        private static IEnumerable<int> ExtractIntConstantsFromMethodBody(MethodInfo method)
-        {
-            MethodBody methodBody = method.GetMethodBody();
-            if (methodBody == null)
-            {
-                yield break;
-            }
-
-            byte[] il = methodBody.GetILAsByteArray();
-            if (il == null || il.Length == 0)
-            {
-                yield break;
-            }
-
-            for (int i = 0; i < il.Length; i++)
-            {
-                byte opcode = il[i];
-                switch (opcode)
-                {
-                    case 0x15:
-                        yield return -1;
-                        break;
-                    case 0x16:
-                        yield return 0;
-                        break;
-                    case 0x17:
-                        yield return 1;
-                        break;
-                    case 0x18:
-                        yield return 2;
-                        break;
-                    case 0x19:
-                        yield return 3;
-                        break;
-                    case 0x1A:
-                        yield return 4;
-                        break;
-                    case 0x1B:
-                        yield return 5;
-                        break;
-                    case 0x1C:
-                        yield return 6;
-                        break;
-                    case 0x1D:
-                        yield return 7;
-                        break;
-                    case 0x1E:
-                        yield return 8;
-                        break;
-                    case 0x1F:
-                        if (i + 1 < il.Length)
-                        {
-                            i += 1;
-                            yield return unchecked((sbyte)il[i]);
-                        }
-                        break;
-                    case 0x20:
-                        if (i + 4 < il.Length)
-                        {
-                            int value = BitConverter.ToInt32(il, i + 1);
-                            i += 4;
-                            yield return value;
-                        }
-                        break;
-                }
-            }
         }
 
         private static void EnsureTravelShopStorage(FieldInfo travelShopField, int minimumLength)
@@ -1007,7 +509,7 @@ namespace StandaloneExtractor.Extractors
                 var row = new NpcShopItemRow
                 {
                     ItemId = itemId,
-                    Name = ResolveItemName(runtime, item, itemId),
+                    Name = runtime.GetItemName(itemId),
                     BuyPrice = (int)runtime.ItemGetStoreValueMethod.Invoke(item, null)
                 };
 
@@ -1018,7 +520,7 @@ namespace StandaloneExtractor.Extractors
             return new NpcShopRow
             {
                 NpcId = mapping.NpcId,
-                NpcName = ResolveNpcName(runtime, mapping.NpcId),
+                NpcName = runtime.GetNpcName(mapping.NpcId),
                 ShopName = mapping.ShopName,
                 Items = items
             };
@@ -1051,78 +553,59 @@ namespace StandaloneExtractor.Extractors
             }
         }
 
-        private static string ResolveItemName(TerrariaRuntime runtime, object item, int itemId)
+        private static Func<int, string> BuildNpcNameResolver(Type langType, Type npcIdType)
         {
-            string name = Convert.ToString(runtime.ItemNameProperty.GetValue(item, null), CultureInfo.InvariantCulture);
-            if (!string.IsNullOrWhiteSpace(name) && !name.StartsWith("ItemName.", StringComparison.Ordinal))
+            MethodInfo getNpcNameMethod = langType.GetMethod("GetNPCNameValue", BindingFlags.Public | BindingFlags.Static);
+            object npcSearch = null;
+            MethodInfo npcSearchGetNameMethod = null;
+            if (npcIdType != null)
             {
-                return name;
-            }
-
-            try
-            {
-                if (runtime.ItemSearch != null && runtime.ItemSearchGetNameMethod != null)
+                FieldInfo searchField = npcIdType.GetField("Search", BindingFlags.Public | BindingFlags.Static);
+                npcSearch = searchField == null ? null : searchField.GetValue(null);
+                if (npcSearch != null)
                 {
-                    ParameterInfo parameter = runtime.ItemSearchGetNameMethod.GetParameters()[0];
-                    object typedId = Convert.ChangeType(itemId, parameter.ParameterType, CultureInfo.InvariantCulture);
-                    string resolved = Convert.ToString(runtime.ItemSearchGetNameMethod.Invoke(runtime.ItemSearch, new[] { typedId }), CultureInfo.InvariantCulture);
-                    if (!string.IsNullOrWhiteSpace(resolved))
-                    {
-                        return resolved;
-                    }
+                    npcSearchGetNameMethod = npcSearch.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                        .FirstOrDefault(m => m.Name == "GetName" && m.GetParameters().Length == 1);
                 }
             }
-            catch
-            {
-            }
 
-            return "Item " + itemId.ToString(CultureInfo.InvariantCulture);
+            return delegate(int npcId)
+            {
+                if (getNpcNameMethod != null)
+                {
+                    try
+                    {
+                        string name = Convert.ToString(getNpcNameMethod.Invoke(null, new object[] { npcId }), CultureInfo.InvariantCulture);
+                        if (!string.IsNullOrWhiteSpace(name)) return name;
+                    }
+                    catch { }
+                }
+
+                if (npcSearch != null && npcSearchGetNameMethod != null)
+                {
+                    try
+                    {
+                        object typedId = Convert.ChangeType(npcId, npcSearchGetNameMethod.GetParameters()[0].ParameterType, CultureInfo.InvariantCulture);
+                        string name = Convert.ToString(npcSearchGetNameMethod.Invoke(npcSearch, new[] { typedId }), CultureInfo.InvariantCulture);
+                        if (!string.IsNullOrWhiteSpace(name)) return name;
+                    }
+                    catch { }
+                }
+
+                return "NPC " + npcId.ToString(CultureInfo.InvariantCulture);
+            };
         }
 
-        private static string ResolveNpcName(TerrariaRuntime runtime, int npcId)
-        {
-            try
-            {
-                string value = Convert.ToString(runtime.GetNpcNameMethod.Invoke(null, new object[] { npcId }), CultureInfo.InvariantCulture);
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                if (runtime.NpcSearch != null && runtime.NpcSearchGetNameMethod != null)
-                {
-                    ParameterInfo parameter = runtime.NpcSearchGetNameMethod.GetParameters()[0];
-                    object typedId = Convert.ChangeType(npcId, parameter.ParameterType, CultureInfo.InvariantCulture);
-                    string value = Convert.ToString(runtime.NpcSearchGetNameMethod.Invoke(runtime.NpcSearch, new[] { typedId }), CultureInfo.InvariantCulture);
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        return value;
-                    }
-                }
-            }
-            catch
-            {
-            }
-
-            return "NPC " + npcId.ToString(CultureInfo.InvariantCulture);
-        }
+        // === Bootstrap Runtime ===
 
         private static TerrariaRuntime BootstrapRuntime(Assembly terrariaAssembly)
         {
-            PrepareTerrariaProgramState(terrariaAssembly);
-
-            Type mainType = terrariaAssembly.GetType("Terraria.Main", throwOnError: true);
-            Type chestType = terrariaAssembly.GetType("Terraria.Chest", throwOnError: true);
-            Type itemType = terrariaAssembly.GetType("Terraria.Item", throwOnError: true);
-            Type playerType = terrariaAssembly.GetType("Terraria.Player", throwOnError: true);
-            Type npcType = terrariaAssembly.GetType("Terraria.NPC", throwOnError: true);
-            Type langType = terrariaAssembly.GetType("Terraria.Lang", throwOnError: true);
+            Type mainType = ReflectionHelpers.GetRequiredType(terrariaAssembly, "Terraria.Main");
+            Type chestType = ReflectionHelpers.GetRequiredType(terrariaAssembly, "Terraria.Chest");
+            Type itemType = ReflectionHelpers.GetRequiredType(terrariaAssembly, "Terraria.Item");
+            Type playerType = ReflectionHelpers.GetRequiredType(terrariaAssembly, "Terraria.Player");
+            Type npcType = ReflectionHelpers.GetRequiredType(terrariaAssembly, "Terraria.NPC");
+            Type langType = ReflectionHelpers.GetRequiredType(terrariaAssembly, "Terraria.Lang");
             Type itemIdType = terrariaAssembly.GetType("Terraria.ID.ItemID", throwOnError: false);
             Type npcIdType = terrariaAssembly.GetType("Terraria.ID.NPCID", throwOnError: false);
 
@@ -1192,63 +675,41 @@ namespace StandaloneExtractor.Extractors
             }
 
             MethodInfo setupShopMethod = chestType.GetMethod("SetupShop", BindingFlags.Public | BindingFlags.Instance);
-            MethodInfo setupTravelShopMethod = ResolveSetupTravelShopMethod(chestType);
             FieldInfo chestItemsField = chestType.GetField("item", BindingFlags.Public | BindingFlags.Instance);
-            FieldInfo travelShopField = ResolveTravelShopField(mainType, chestType);
             FieldInfo itemTypeField = itemType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
             FieldInfo itemSpecialCurrencyField = itemType.GetField("shopSpecialCurrency", BindingFlags.Public | BindingFlags.Instance);
             PropertyInfo itemIsAirProperty = itemType.GetProperty("IsAir", BindingFlags.Public | BindingFlags.Instance);
-            PropertyInfo itemNameProperty = itemType.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance);
             MethodInfo itemGetStoreValueMethod = itemType.GetMethod("GetStoreValue", BindingFlags.Public | BindingFlags.Instance);
             MethodInfo itemSetDefaultsMethod = itemType.GetMethod("SetDefaults", new[] { typeof(int) });
             FieldInfo itemCountField = itemIdType == null ? null : itemIdType.GetField("Count", BindingFlags.Public | BindingFlags.Static);
-            int itemIdCount = itemCountField == null ? 0 : Convert.ToInt32(itemCountField.GetValue(null), CultureInfo.InvariantCulture);
-            MethodInfo getNpcNameMethod = langType.GetMethod("GetNPCNameValue", BindingFlags.Public | BindingFlags.Static);
-            FieldInfo itemSearchField = itemIdType == null ? null : itemIdType.GetField("Search", BindingFlags.Public | BindingFlags.Static);
-            object itemSearch = itemSearchField == null ? null : itemSearchField.GetValue(null);
-            MethodInfo itemSearchGetNameMethod = itemSearch == null
-                ? null
-                : itemSearch.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(method => method.Name == "GetName" && method.GetParameters().Length == 1);
-            FieldInfo npcSearchField = npcIdType == null ? null : npcIdType.GetField("Search", BindingFlags.Public | BindingFlags.Static);
-            object npcSearch = npcSearchField == null ? null : npcSearchField.GetValue(null);
-            MethodInfo npcSearchGetNameMethod = npcSearch == null
-                ? null
-                : npcSearch.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                    .FirstOrDefault(method => method.Name == "GetName" && method.GetParameters().Length == 1);
 
-            if (setupShopMethod == null
-                || chestItemsField == null
-                || itemTypeField == null
-                || itemSpecialCurrencyField == null
-                || itemIsAirProperty == null
-                || itemNameProperty == null
-                || itemGetStoreValueMethod == null
-                || itemSetDefaultsMethod == null
-                || getNpcNameMethod == null)
+            if (setupShopMethod == null || chestItemsField == null || itemTypeField == null
+                || itemSpecialCurrencyField == null || itemIsAirProperty == null
+                || itemGetStoreValueMethod == null || itemSetDefaultsMethod == null)
             {
                 throw new InvalidOperationException("Required Terraria members for NPC shop extraction were not found.");
             }
 
-            return new TerrariaRuntime(
-                chestType,
-                setupShopMethod,
-                setupTravelShopMethod,
-                chestItemsField,
-                travelShopField,
-                itemType,
-                itemTypeField,
-                itemSpecialCurrencyField,
-                itemIsAirProperty,
-                itemNameProperty,
-                itemGetStoreValueMethod,
-                itemSetDefaultsMethod,
-                itemIdCount,
-                getNpcNameMethod,
-                itemSearch,
-                itemSearchGetNameMethod,
-                npcSearch,
-                npcSearchGetNameMethod);
+            Func<int, string> getItemName = ItemNameResolver.Build(terrariaAssembly);
+            Func<int, string> getNpcName = BuildNpcNameResolver(langType, npcIdType);
+
+            return new TerrariaRuntime
+            {
+                ChestType = chestType,
+                SetupShopMethod = setupShopMethod,
+                SetupTravelShopMethod = ResolveSetupTravelShopMethod(chestType),
+                ChestItemsField = chestItemsField,
+                TravelShopField = ResolveTravelShopField(mainType, chestType),
+                ItemType = itemType,
+                ItemTypeField = itemTypeField,
+                ItemSpecialCurrencyField = itemSpecialCurrencyField,
+                ItemIsAirProperty = itemIsAirProperty,
+                ItemGetStoreValueMethod = itemGetStoreValueMethod,
+                ItemSetDefaultsMethod = itemSetDefaultsMethod,
+                ItemIdCount = itemCountField == null ? 0 : Convert.ToInt32(itemCountField.GetValue(null), CultureInfo.InvariantCulture),
+                GetItemName = getItemName,
+                GetNpcName = getNpcName
+            };
         }
 
         private static object CreateUnifiedRandomInstance(Type unifiedRandomType, int seed)
@@ -1401,29 +862,6 @@ namespace StandaloneExtractor.Extractors
             return Activator.CreateInstance(type);
         }
 
-        private static void PrepareTerrariaProgramState(Assembly terrariaAssembly)
-        {
-            Type programType = terrariaAssembly.GetType("Terraria.Program", throwOnError: false);
-            if (programType == null)
-            {
-                return;
-            }
-
-            FieldInfo savePathField = programType.GetField("SavePath", BindingFlags.Public | BindingFlags.Static);
-            if (savePathField != null)
-            {
-                string savePath = Path.Combine(Environment.CurrentDirectory, "_terraria-save");
-                Directory.CreateDirectory(savePath);
-                savePathField.SetValue(null, savePath);
-            }
-
-            FieldInfo launchParametersField = programType.GetField("LaunchParameters", BindingFlags.Public | BindingFlags.Static);
-            if (launchParametersField != null)
-            {
-                launchParametersField.SetValue(null, new Dictionary<string, string>());
-            }
-        }
-
         private static void InitializePlayerInventory(object player, Type itemType)
         {
             if (player == null)
@@ -1473,128 +911,63 @@ namespace StandaloneExtractor.Extractors
             }
         }
 
-        private static Assembly LoadTerrariaAssembly(string terrariaExePath)
-        {
-            string terrariaDirectory = Path.GetDirectoryName(terrariaExePath);
-            string decompiledDirectory = FindRepositoryDecompiledDirectory();
+        // === Shop Mappings ===
 
-            TerrariaDependencyResolver.EnsureRegistered(terrariaExePath, terrariaDirectory, decompiledDirectory);
-
-            return Assembly.LoadFrom(terrariaExePath);
-        }
-
-        private static string FindRepositoryDecompiledDirectory()
-        {
-            var roots = new List<string>();
-            if (!string.IsNullOrWhiteSpace(AppDomain.CurrentDomain.BaseDirectory))
-            {
-                roots.Add(AppDomain.CurrentDomain.BaseDirectory);
-            }
-
-            if (!string.IsNullOrWhiteSpace(Environment.CurrentDirectory)
-                && !roots.Any(path => string.Equals(path, Environment.CurrentDirectory, StringComparison.OrdinalIgnoreCase)))
-            {
-                roots.Add(Environment.CurrentDirectory);
-            }
-
-            foreach (string root in roots)
-            {
-                DirectoryInfo current = new DirectoryInfo(root);
-                while (current != null)
-                {
-                    string candidatePath = Path.Combine(current.FullName, "decompiled");
-                    string relogicLibraryPath = Path.Combine(candidatePath, "Terraria.Libraries.ReLogic.ReLogic.dll");
-                    if (File.Exists(relogicLibraryPath))
-                    {
-                        return candidatePath;
-                    }
-
-                    candidatePath = Path.Combine(current.FullName, "extract-mod", "decompiled");
-                    relogicLibraryPath = Path.Combine(candidatePath, "Terraria.Libraries.ReLogic.ReLogic.dll");
-                    if (File.Exists(relogicLibraryPath))
-                    {
-                        return candidatePath;
-                    }
-
-                    current = current.Parent;
-                }
-            }
-
-            return null;
-        }
-
-        private static string ResolveTerrariaExePath(string[] args)
-        {
-            if (args != null)
-            {
-                for (int i = 0; i < args.Length; i++)
-                {
-                    bool isTerrariaFlag = string.Equals(args[i], "--terraria", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(args[i], "-t", StringComparison.OrdinalIgnoreCase);
-                    if (!isTerrariaFlag)
-                    {
-                        continue;
-                    }
-
-                    if (i + 1 < args.Length && !string.IsNullOrWhiteSpace(args[i + 1]))
-                    {
-                        return Path.GetFullPath(args[i + 1]);
-                    }
-                }
-            }
-
-            return DefaultTerrariaExePath;
-        }
-
-        private static IEnumerable<ShopMapping> GetShopMappings()
+        private static ShopMapping[] GetShopMappings()
         {
             return new[]
             {
-                new ShopMapping(1, 17, "Shop 1"),
-                new ShopMapping(2, 19, "Shop 2"),
-                new ShopMapping(3, 20, "Shop 3"),
-                new ShopMapping(4, 38, "Shop 4"),
-                new ShopMapping(5, 54, "Shop 5"),
-                new ShopMapping(6, 107, "Shop 6"),
-                new ShopMapping(7, 108, "Shop 7"),
-                new ShopMapping(8, 124, "Shop 8"),
-                new ShopMapping(9, 142, "Shop 9"),
-                new ShopMapping(10, 160, "Shop 10"),
-                new ShopMapping(11, 178, "Shop 11"),
-                new ShopMapping(12, 207, "Shop 12"),
-                new ShopMapping(13, 208, "Shop 13"),
-                new ShopMapping(14, 209, "Shop 14"),
-                new ShopMapping(15, 227, "Shop 15"),
-                new ShopMapping(16, 228, "Shop 16"),
-                new ShopMapping(17, 229, "Shop 17"),
-                new ShopMapping(18, 353, "Shop 18"),
-                new ShopMapping(19, 368, "Shop 19", useTravelShop: true),
-                new ShopMapping(20, 453, "Shop 20"),
-                new ShopMapping(21, 550, "Shop 21"),
-                new ShopMapping(22, 588, "Shop 22"),
-                new ShopMapping(23, 633, "Shop 23", useZoologistILFallback: true),
-                new ShopMapping(24, 663, "Shop 24"),
-                new ShopMapping(25, 227, "Shop 25")
+                new ShopMapping { ShopId = 1, NpcId = 17, ShopName = "Shop 1" },
+                new ShopMapping { ShopId = 2, NpcId = 19, ShopName = "Shop 2" },
+                new ShopMapping { ShopId = 3, NpcId = 20, ShopName = "Shop 3" },
+                new ShopMapping { ShopId = 4, NpcId = 38, ShopName = "Shop 4" },
+                new ShopMapping { ShopId = 5, NpcId = 54, ShopName = "Shop 5" },
+                new ShopMapping { ShopId = 6, NpcId = 107, ShopName = "Shop 6" },
+                new ShopMapping { ShopId = 7, NpcId = 108, ShopName = "Shop 7" },
+                new ShopMapping { ShopId = 8, NpcId = 124, ShopName = "Shop 8" },
+                new ShopMapping { ShopId = 9, NpcId = 142, ShopName = "Shop 9" },
+                new ShopMapping { ShopId = 10, NpcId = 160, ShopName = "Shop 10" },
+                new ShopMapping { ShopId = 11, NpcId = 178, ShopName = "Shop 11" },
+                new ShopMapping { ShopId = 12, NpcId = 207, ShopName = "Shop 12" },
+                new ShopMapping { ShopId = 13, NpcId = 208, ShopName = "Shop 13" },
+                new ShopMapping { ShopId = 14, NpcId = 209, ShopName = "Shop 14" },
+                new ShopMapping { ShopId = 15, NpcId = 227, ShopName = "Shop 15" },
+                new ShopMapping { ShopId = 16, NpcId = 228, ShopName = "Shop 16" },
+                new ShopMapping { ShopId = 17, NpcId = 229, ShopName = "Shop 17" },
+                new ShopMapping { ShopId = 18, NpcId = 353, ShopName = "Shop 18" },
+                new ShopMapping { ShopId = 19, NpcId = 368, ShopName = "Shop 19", UseTravelShop = true },
+                new ShopMapping { ShopId = 20, NpcId = 453, ShopName = "Shop 20" },
+                new ShopMapping { ShopId = 21, NpcId = 550, ShopName = "Shop 21" },
+                new ShopMapping { ShopId = 22, NpcId = 588, ShopName = "Shop 22" },
+                new ShopMapping { ShopId = 23, NpcId = 633, ShopName = "Shop 23", UseZoologistILFallback = true },
+                new ShopMapping { ShopId = 24, NpcId = 663, ShopName = "Shop 24" },
+                new ShopMapping { ShopId = 25, NpcId = 227, ShopName = "Shop 25" }
             };
         }
+
+        // === Decompiled Source Parsing ===
 
         private static ParsedShopSource ParseShopSourceData()
         {
             string chestSourcePath = ResolveChestSourcePath();
             if (string.IsNullOrWhiteSpace(chestSourcePath) || !File.Exists(chestSourcePath))
             {
-                return new ParsedShopSource(
-                    new Dictionary<int, Dictionary<int, List<string>>>(),
-                    new Dictionary<int, HashSet<int>>());
+                return new ParsedShopSource
+                {
+                    ConditionsByShop = new Dictionary<int, Dictionary<int, List<string>>>(),
+                    ItemIdsByShop = new Dictionary<int, HashSet<int>>()
+                };
             }
 
             string[] lines = File.ReadAllLines(chestSourcePath);
             int methodStart = Array.FindIndex(lines, l => l.Contains("public void SetupShop(int type)"));
             if (methodStart < 0)
             {
-                return new ParsedShopSource(
-                    new Dictionary<int, Dictionary<int, List<string>>>(),
-                    new Dictionary<int, HashSet<int>>());
+                return new ParsedShopSource
+                {
+                    ConditionsByShop = new Dictionary<int, Dictionary<int, List<string>>>(),
+                    ItemIdsByShop = new Dictionary<int, HashSet<int>>()
+                };
             }
 
             var conditionsByShop = new Dictionary<int, Dictionary<int, List<string>>>();
@@ -1653,7 +1026,7 @@ namespace StandaloneExtractor.Extractors
 
                         if (!string.IsNullOrWhiteSpace(pendingCondition))
                         {
-                            activeConditions.Push(new ConditionScope(pendingCondition, braceDepth));
+                            activeConditions.Push(new ConditionScope { Expression = pendingCondition, Depth = braceDepth });
                             pendingCondition = null;
                         }
                     }
@@ -1679,7 +1052,11 @@ namespace StandaloneExtractor.Extractors
                 }
             }
 
-            return new ParsedShopSource(conditionsByShop, itemIdsByShop);
+            return new ParsedShopSource
+            {
+                ConditionsByShop = conditionsByShop,
+                ItemIdsByShop = itemIdsByShop
+            };
         }
 
         private static void AddItemRecord(IDictionary<int, HashSet<int>> itemIdsByShop, int shopId, int itemId)
@@ -1766,151 +1143,45 @@ namespace StandaloneExtractor.Extractors
             return null;
         }
 
-        private sealed class IlInstruction
-        {
-            public int Offset { get; set; }
-
-            public OpCode OpCode { get; set; }
-
-            public int? Int32Operand { get; set; }
-
-            public int? BranchTarget { get; set; }
-
-            public int[] SwitchTargets { get; set; }
-        }
-
-        private sealed class ShopMapping
-        {
-            public ShopMapping(
-                int shopId,
-                int npcId,
-                string shopName,
-                bool useTravelShop = false,
-                bool useZoologistILFallback = false)
-            {
-                ShopId = shopId;
-                NpcId = npcId;
-                ShopName = shopName;
-                UseTravelShop = useTravelShop;
-                UseZoologistILFallback = useZoologistILFallback;
-            }
-
-            public int ShopId { get; private set; }
-
-            public int NpcId { get; private set; }
-
-            public string ShopName { get; private set; }
-
-            public bool UseTravelShop { get; private set; }
-
-            public bool UseZoologistILFallback { get; private set; }
-        }
+        // === Nested Types ===
 
         private sealed class ConditionScope
         {
-            public ConditionScope(string expression, int depth)
-            {
-                Expression = expression;
-                Depth = depth;
-            }
-
-            public string Expression { get; private set; }
-
-            public int Depth { get; private set; }
-        }
-
-        private sealed class TerrariaRuntime
-        {
-            public TerrariaRuntime(
-                Type chestType,
-                MethodInfo setupShopMethod,
-                MethodInfo setupTravelShopMethod,
-                FieldInfo chestItemsField,
-                FieldInfo travelShopField,
-                Type itemType,
-                FieldInfo itemTypeField,
-                FieldInfo itemSpecialCurrencyField,
-                PropertyInfo itemIsAirProperty,
-                PropertyInfo itemNameProperty,
-                MethodInfo itemGetStoreValueMethod,
-                MethodInfo itemSetDefaultsMethod,
-                int itemIdCount,
-                MethodInfo getNpcNameMethod,
-                object itemSearch,
-                MethodInfo itemSearchGetNameMethod,
-                object npcSearch,
-                MethodInfo npcSearchGetNameMethod)
-            {
-                ChestType = chestType;
-                SetupShopMethod = setupShopMethod;
-                SetupTravelShopMethod = setupTravelShopMethod;
-                ChestItemsField = chestItemsField;
-                TravelShopField = travelShopField;
-                ItemType = itemType;
-                ItemTypeField = itemTypeField;
-                ItemSpecialCurrencyField = itemSpecialCurrencyField;
-                ItemIsAirProperty = itemIsAirProperty;
-                ItemNameProperty = itemNameProperty;
-                ItemGetStoreValueMethod = itemGetStoreValueMethod;
-                ItemSetDefaultsMethod = itemSetDefaultsMethod;
-                ItemIdCount = itemIdCount;
-                GetNpcNameMethod = getNpcNameMethod;
-                ItemSearch = itemSearch;
-                ItemSearchGetNameMethod = itemSearchGetNameMethod;
-                NpcSearch = npcSearch;
-                NpcSearchGetNameMethod = npcSearchGetNameMethod;
-            }
-
-            public Type ChestType { get; private set; }
-
-            public MethodInfo SetupShopMethod { get; private set; }
-
-            public MethodInfo SetupTravelShopMethod { get; private set; }
-
-            public FieldInfo ChestItemsField { get; private set; }
-
-            public FieldInfo TravelShopField { get; private set; }
-
-            public Type ItemType { get; private set; }
-
-            public FieldInfo ItemTypeField { get; private set; }
-
-            public FieldInfo ItemSpecialCurrencyField { get; private set; }
-
-            public PropertyInfo ItemIsAirProperty { get; private set; }
-
-            public PropertyInfo ItemNameProperty { get; private set; }
-
-            public MethodInfo ItemGetStoreValueMethod { get; private set; }
-
-            public MethodInfo ItemSetDefaultsMethod { get; private set; }
-
-            public int ItemIdCount { get; private set; }
-
-            public MethodInfo GetNpcNameMethod { get; private set; }
-
-            public object ItemSearch { get; private set; }
-
-            public MethodInfo ItemSearchGetNameMethod { get; private set; }
-
-            public object NpcSearch { get; private set; }
-
-            public MethodInfo NpcSearchGetNameMethod { get; private set; }
+            public string Expression;
+            public int Depth;
         }
 
         private sealed class ParsedShopSource
         {
-            public ParsedShopSource(
-                Dictionary<int, Dictionary<int, List<string>>> conditionsByShop,
-                Dictionary<int, HashSet<int>> itemIdsByShop)
-            {
-                ConditionsByShop = conditionsByShop;
-                ItemIdsByShop = itemIdsByShop;
-            }
+            public Dictionary<int, Dictionary<int, List<string>>> ConditionsByShop;
+            public Dictionary<int, HashSet<int>> ItemIdsByShop;
+        }
 
-            public Dictionary<int, Dictionary<int, List<string>>> ConditionsByShop { get; private set; }
+        private sealed class ShopMapping
+        {
+            public int ShopId;
+            public int NpcId;
+            public string ShopName;
+            public bool UseTravelShop;
+            public bool UseZoologistILFallback;
+        }
 
-            public Dictionary<int, HashSet<int>> ItemIdsByShop { get; private set; }
+        private sealed class TerrariaRuntime
+        {
+            public Type ChestType;
+            public MethodInfo SetupShopMethod;
+            public MethodInfo SetupTravelShopMethod;
+            public FieldInfo ChestItemsField;
+            public FieldInfo TravelShopField;
+            public Type ItemType;
+            public FieldInfo ItemTypeField;
+            public FieldInfo ItemSpecialCurrencyField;
+            public PropertyInfo ItemIsAirProperty;
+            public MethodInfo ItemGetStoreValueMethod;
+            public MethodInfo ItemSetDefaultsMethod;
+            public int ItemIdCount;
+            public Func<int, string> GetItemName;
+            public Func<int, string> GetNpcName;
         }
     }
 }
