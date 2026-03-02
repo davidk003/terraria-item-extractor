@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Newtonsoft.Json;
 
 namespace StandaloneExtractor
 {
@@ -169,31 +170,28 @@ namespace StandaloneExtractor
 
             try
             {
-                using (var stream = File.OpenRead(itemsJsonPath))
+                string json = File.ReadAllText(itemsJsonPath);
+                List<ItemRow> rows = JsonConvert.DeserializeObject<List<ItemRow>>(json);
+                if (rows == null)
                 {
-                    var serializer = new System.Runtime.Serialization.Json.DataContractJsonSerializer(typeof(List<ItemRow>));
-                    var rows = serializer.ReadObject(stream) as List<ItemRow>;
-                    if (rows == null)
-                    {
-                        return new Dictionary<int, string>();
-                    }
-
-                    var map = new Dictionary<int, string>();
-                    foreach (ItemRow row in rows)
-                    {
-                        if (row == null || row.Id <= 0)
-                        {
-                            continue;
-                        }
-
-                        if (!map.ContainsKey(row.Id))
-                        {
-                            map[row.Id] = row.InternalName ?? string.Empty;
-                        }
-                    }
-
-                    return map;
+                    return new Dictionary<int, string>();
                 }
+
+                var map = new Dictionary<int, string>();
+                foreach (ItemRow row in rows)
+                {
+                    if (row == null || row.Id <= 0)
+                    {
+                        continue;
+                    }
+
+                    if (!map.ContainsKey(row.Id))
+                    {
+                        map[row.Id] = row.InternalName ?? string.Empty;
+                    }
+                }
+
+                return map;
             }
             catch (Exception ex)
             {

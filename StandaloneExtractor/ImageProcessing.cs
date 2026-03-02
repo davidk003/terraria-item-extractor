@@ -47,22 +47,16 @@ namespace StandaloneExtractor
 
     public sealed class XnbTextureData
     {
-        public XnbTextureData(int width, int height, int surfaceFormat, string typeReader, byte[] rgbaPixels)
+        public XnbTextureData(int width, int height, byte[] rgbaPixels)
         {
             Width = width;
             Height = height;
-            SurfaceFormat = surfaceFormat;
-            TypeReader = typeReader ?? string.Empty;
             RgbaPixels = rgbaPixels ?? Array.Empty<byte>();
         }
 
         public int Width { get; private set; }
 
         public int Height { get; private set; }
-
-        public int SurfaceFormat { get; private set; }
-
-        public string TypeReader { get; private set; }
 
         public byte[] RgbaPixels { get; private set; }
     }
@@ -93,8 +87,8 @@ namespace StandaloneExtractor
                 using (var payloadStream = new MemoryStream(payload, writable: false))
                 using (var payloadReader = new BinaryReader(payloadStream, Encoding.UTF8))
                 {
-                    string primaryReader = ReadTypeReaders(payloadReader, header.Platform);
-                    return ReadTextureData(payloadReader, primaryReader);
+                    ReadTypeReaders(payloadReader, header.Platform);
+                    return ReadTextureData(payloadReader);
                 }
             }
         }
@@ -205,7 +199,7 @@ namespace StandaloneExtractor
             return primaryReader;
         }
 
-        private static XnbTextureData ReadTextureData(BinaryReader payloadReader, string primaryReader)
+        private static XnbTextureData ReadTextureData(BinaryReader payloadReader)
         {
             int surfaceFormat = payloadReader.ReadInt32();
             int width = payloadReader.ReadInt32();
@@ -249,7 +243,7 @@ namespace StandaloneExtractor
             }
 
             byte[] rgba = DecodePixels(surfaceFormat, mip0Data, width, height);
-            return new XnbTextureData(width, height, surfaceFormat, primaryReader, rgba);
+            return new XnbTextureData(width, height, rgba);
         }
 
         private static byte[] DecodePixels(int surfaceFormat, byte[] mip0Data, int width, int height)

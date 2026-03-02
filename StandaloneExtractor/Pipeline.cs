@@ -1,55 +1,53 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.Serialization.Json;
 using System.Text;
+using CsvHelper;
+using Newtonsoft.Json;
 
 namespace StandaloneExtractor
 {
-    // === JSON Writer ===
-
-    internal sealed class JsonWriter
+    internal static class OutputWriter
     {
-        public void Write<T>(string outputDirectory, string fileName, IEnumerable<T> rows)
+        internal static void WriteJson<T>(string outputDirectory, string fileName, IEnumerable<T> rows)
         {
             Directory.CreateDirectory(outputDirectory);
             string filePath = Path.Combine(outputDirectory, fileName);
             List<T> materializedRows = rows == null ? new List<T>() : rows.ToList();
-
-            var serializer = new DataContractJsonSerializer(typeof(List<T>));
-            using (var stream = File.Create(filePath))
-            {
-                serializer.WriteObject(stream, materializedRows);
-            }
+            string json = JsonConvert.SerializeObject(materializedRows, Formatting.Indented);
+            File.WriteAllText(filePath, json);
         }
-    }
 
-    // === CSV Writer ===
-
-    internal sealed class CsvWriter
-    {
-        public void Write<T>(string outputDirectory, string fileName, IEnumerable<T> rows)
+        internal static void WriteCsv<T>(string outputDirectory, string fileName, IEnumerable<T> rows)
         {
             Directory.CreateDirectory(outputDirectory);
             string filePath = Path.Combine(outputDirectory, fileName);
-            T[] materializedRows = rows == null ? new T[0] : rows.ToArray();
+            List<T> materializedRows = rows == null ? new List<T>() : rows.ToList();
             PropertyInfo[] properties = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
-            using (var writer = new StreamWriter(filePath, false))
+            using (var streamWriter = new StreamWriter(filePath, false))
+            using (var csvWriter = new CsvWriter(streamWriter, CultureInfo.InvariantCulture))
             {
-                if (properties.Length > 0)
+                foreach (PropertyInfo property in properties)
                 {
-                    writer.WriteLine(string.Join(",", properties.Select(p => Escape(p.Name))));
+                    csvWriter.WriteField(property.Name);
                 }
+
+                csvWriter.NextRecord();
 
                 foreach (T row in materializedRows)
                 {
-                    string line = string.Join(",", properties.Select(p => Escape(ToCsvCell(p.GetValue(row, null)))));
-                    writer.WriteLine(line);
+                    foreach (PropertyInfo property in properties)
+                    {
+                        csvWriter.WriteField(ToCsvCell(property.GetValue(row, null)));
+                    }
+
+                    csvWriter.NextRecord();
                 }
             }
         }
@@ -61,7 +59,7 @@ namespace StandaloneExtractor
                 return string.Empty;
             }
 
-            var enumerable = value as System.Collections.IEnumerable;
+            var enumerable = value as IEnumerable;
             if (!(value is string) && enumerable != null)
             {
                 var items = new List<string>();
@@ -74,22 +72,6 @@ namespace StandaloneExtractor
             }
 
             return Convert.ToString(value, CultureInfo.InvariantCulture);
-        }
-
-        private static string Escape(string value)
-        {
-            if (value == null)
-            {
-                return string.Empty;
-            }
-
-            string escaped = value.Replace("\"", "\"\"");
-            if (escaped.IndexOfAny(new[] { ',', '"', '\r', '\n' }) >= 0)
-            {
-                return "\"" + escaped + "\"";
-            }
-
-            return escaped;
         }
     }
 
@@ -424,9 +406,6 @@ namespace StandaloneExtractor
             Console.WriteLine("========================================");
         }
 
-        private static readonly DataContractJsonSerializer PhaseResultSerializer =
-            new DataContractJsonSerializer(typeof(PhaseExecutionResult));
-
         private static void WritePhaseResult(string phaseResultPath, PhaseExecutionResult result)
         {
             string directory = Path.GetDirectoryName(phaseResultPath);
@@ -435,18 +414,25 @@ namespace StandaloneExtractor
                 Directory.CreateDirectory(directory);
             }
 
-            using (var stream = new FileStream(phaseResultPath, FileMode.Create, FileAccess.Write))
-            {
-                PhaseResultSerializer.WriteObject(stream, result);
-            }
+            string json = JsonConvert.SerializeObject(result, Formatting.Indented);
+            File.WriteAllText(phaseResultPath, json);
         }
 
         private static PhaseExecutionResult DeserializePhaseResult(string resultPath)
         {
-            using (var stream = File.OpenRead(resultPath))
+            string json = File.ReadAllText(resultPath);
+            PhaseExecutionResult result = JsonConvert.DeserializeObject<PhaseExecutionResult>(json);
+            if (result == null)
             {
-                return (PhaseExecutionResult)PhaseResultSerializer.ReadObject(stream);
+                return null;
             }
+
+            if (result.Errors == null)
+            {
+                result.Errors = new List<string>();
+            }
+
+            return result;
         }
     }
 
@@ -462,8 +448,6 @@ namespace StandaloneExtractor
             string decompiledDirectory)
         {
             var report = new BootstrapReport();
-            report.Scope = scope;
-
             var stage1 = new BootstrapStageResult
             {
                 Stage = "1-paths",
@@ -808,14 +792,14 @@ namespace StandaloneExtractor
 
     internal static class WorkerRunner
     {
-        private static readonly Dictionary<string, Func<ExtractionContext, JsonWriter, CsvWriter, string, string, PhaseExecutionResult>> PhaseRegistry =
-            new Dictionary<string, Func<ExtractionContext, JsonWriter, CsvWriter, string, string, PhaseExecutionResult>>(StringComparer.Ordinal)
+        private static readonly Dictionary<string, Func<ExtractionContext, string, string, PhaseExecutionResult>> PhaseRegistry =
+            new Dictionary<string, Func<ExtractionContext, string, string, PhaseExecutionResult>>(StringComparer.Ordinal)
             {
-                { "items", (ctx, jw, cw, fs, pk) => RunPhase(new ItemDataExtractor(), ctx, jw, cw, fs, pk) },
-                { "shimmer", (ctx, jw, cw, fs, pk) => RunPhase(new ShimmerDataExtractor(), ctx, jw, cw, fs, pk) },
-                { "recipes", (ctx, jw, cw, fs, pk) => RunPhase(new RecipeDataExtractor(), ctx, jw, cw, fs, pk) },
-                { "npc_shops", (ctx, jw, cw, fs, pk) => RunPhase(new NpcShopDataExtractor(), ctx, jw, cw, fs, pk) },
-                { "sprites", (ctx, jw, cw, fs, pk) => RunPhase(new SpriteExtractorPhase(), ctx, jw, cw, fs, pk) }
+                { "items", (ctx, fs, pk) => RunPhase(new ItemDataExtractor(), ctx, fs, pk) },
+                { "shimmer", (ctx, fs, pk) => RunPhase(new ShimmerDataExtractor(), ctx, fs, pk) },
+                { "recipes", (ctx, fs, pk) => RunPhase(new RecipeDataExtractor(), ctx, fs, pk) },
+                { "npc_shops", (ctx, fs, pk) => RunPhase(new NpcShopDataExtractor(), ctx, fs, pk) },
+                { "sprites", (ctx, fs, pk) => RunPhase(new SpriteExtractorPhase(), ctx, fs, pk) }
             };
 
         internal static int RunWorker(string[] normalizedArgs)
@@ -846,9 +830,6 @@ namespace StandaloneExtractor
                 terrariaDirectory,
                 decompiledDirectory);
 
-            var jsonWriter = new JsonWriter();
-            var csvWriter = new CsvWriter();
-
             Assembly terrariaAssembly = null;
             if (File.Exists(terrariaExePath))
             {
@@ -863,7 +844,7 @@ namespace StandaloneExtractor
                 }
             }
 
-            var context = new ExtractionContext(outputDirectory, normalizedArgs, terrariaAssembly, terrariaDirectory);
+            var context = new ExtractionContext(outputDirectory, terrariaAssembly, terrariaDirectory);
 
             PhaseExecutionResult result;
 
@@ -876,7 +857,7 @@ namespace StandaloneExtractor
             {
                 try
                 {
-                    result = ExecuteConcretePhase(phase.Key, phase.FileStem, context, jsonWriter, csvWriter);
+                    result = ExecuteConcretePhase(phase.Key, phase.FileStem, context);
                 }
                 catch (Exception ex)
                 {
@@ -923,13 +904,11 @@ namespace StandaloneExtractor
         private static PhaseExecutionResult ExecuteConcretePhase(
             string phaseKey,
             string fileStem,
-            ExtractionContext context,
-            JsonWriter jsonWriter,
-            CsvWriter csvWriter)
+            ExtractionContext context)
         {
             if (PhaseRegistry.TryGetValue(phaseKey, out var factory))
             {
-                return factory(context, jsonWriter, csvWriter, fileStem, phaseKey);
+                return factory(context, fileStem, phaseKey);
             }
 
             return Orchestrator.CreateFailedResult(phaseKey, fileStem, context.OutputDirectory, "Unsupported phase key: " + phaseKey);
@@ -938,8 +917,6 @@ namespace StandaloneExtractor
         private static PhaseExecutionResult RunPhase<T>(
             IExtractorPhase<T> extractor,
             ExtractionContext context,
-            JsonWriter jsonWriter,
-            CsvWriter csvWriter,
             string fileStem,
             string phaseKey)
         {
@@ -992,8 +969,8 @@ namespace StandaloneExtractor
 
             try
             {
-                jsonWriter.Write(context.OutputDirectory, fileStem + ".json", rows);
-                csvWriter.Write(context.OutputDirectory, fileStem + ".csv", rows);
+                OutputWriter.WriteJson(context.OutputDirectory, fileStem + ".json", rows);
+                OutputWriter.WriteCsv(context.OutputDirectory, fileStem + ".csv", rows);
 
                 Console.WriteLine("[Phase] " + label + " - wrote " + Path.GetFileName(jsonPath) + " and " + Path.GetFileName(csvPath));
             }

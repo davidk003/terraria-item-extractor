@@ -7,17 +7,14 @@ namespace StandaloneExtractor
 {
     public sealed class ExtractionContext
     {
-        public ExtractionContext(string outputDirectory, string[] commandLineArgs, Assembly terrariaAssembly, string terrariaDirectory)
+        public ExtractionContext(string outputDirectory, Assembly terrariaAssembly, string terrariaDirectory)
         {
             OutputDirectory = outputDirectory;
-            CommandLineArgs = commandLineArgs ?? new string[0];
             TerrariaAssembly = terrariaAssembly;
             TerrariaDirectory = terrariaDirectory ?? string.Empty;
         }
 
         public string OutputDirectory { get; private set; }
-
-        public string[] CommandLineArgs { get; private set; }
 
         public Assembly TerrariaAssembly { get; private set; }
 
@@ -203,12 +200,6 @@ namespace StandaloneExtractor
 
         [DataMember(Name = "errors")]
         public List<string> Errors { get; set; }
-
-        [OnDeserialized]
-        private void OnDeserialized(StreamingContext context)
-        {
-            if (Errors == null) Errors = new List<string>();
-        }
     }
 
     public sealed class BootstrapReport
@@ -217,8 +208,6 @@ namespace StandaloneExtractor
         {
             Stages = new List<BootstrapStageResult>();
         }
-
-        public string Scope { get; set; }
 
         public List<BootstrapStageResult> Stages { get; private set; }
 

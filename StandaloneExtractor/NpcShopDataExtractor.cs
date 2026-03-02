@@ -4,9 +4,10 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Reflection.Emit;
 using System.Runtime.Serialization;
 using System.Text.RegularExpressions;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 namespace StandaloneExtractor
 {
@@ -43,19 +44,26 @@ namespace StandaloneExtractor
                 return new List<NpcShopRow>();
             }
 
-            var shops = new List<NpcShopRow>();
-            foreach (ShopMapping mapping in GetShopMappings())
+            try
             {
-                NpcShopRow extractedShop = ExtractShop(mapping, runtime, parsedShopSource);
-                if (extractedShop != null)
+                var shops = new List<NpcShopRow>();
+                foreach (ShopMapping mapping in GetShopMappings())
                 {
-                    shops.Add(extractedShop);
+                    NpcShopRow extractedShop = ExtractShop(mapping, runtime, parsedShopSource);
+                    if (extractedShop != null)
+                    {
+                        shops.Add(extractedShop);
+                    }
                 }
-            }
 
-            int totalItemRows = shops.Sum(s => s.Items.Count);
-            Console.WriteLine("[npc-shops] Extracted " + shops.Count + " shops and " + totalItemRows + " items");
-            return shops;
+                int totalItemRows = shops.Sum(s => s.Items.Count);
+                Console.WriteLine("[npc-shops] Extracted " + shops.Count + " shops and " + totalItemRows + " items");
+                return shops;
+            }
+            finally
+            {
+                runtime.Dispose();
+            }
         }
 
         // === Shop Extraction ===
@@ -290,41 +298,37 @@ namespace StandaloneExtractor
                 return;
             }
 
-            List<IlInstruction> instructions = IlParser.ParseIlInstructions(runtime.SetupShopMethod);
-            if (instructions.Count == 0)
+            MethodDefinition setupShopDefinition = ResolveMethodDefinition(runtime, runtime.SetupShopMethod);
+            if (setupShopDefinition == null || !setupShopDefinition.HasBody)
             {
                 return;
             }
 
-            int caseStart;
-            int caseEnd;
-            if (!TryResolveCaseRangeContainingBestiaryCall(runtime.SetupShopMethod, instructions, out caseStart, out caseEnd))
+            IList<Instruction> instructions = setupShopDefinition.Body.Instructions;
+            if (instructions == null || instructions.Count == 0)
             {
                 return;
             }
 
-            int setDefaultsToken = runtime.ItemSetDefaultsMethod.MetadataToken;
-            for (int i = 0; i < instructions.Count; i++)
+            int bestiaryCallIndex = FindInstructionIndex(instructions, IsBestiaryProgressCall);
+            if (bestiaryCallIndex < 0)
             {
-                IlInstruction instruction = instructions[i];
-                if (instruction.Offset < caseStart || instruction.Offset >= caseEnd)
-                {
-                    continue;
-                }
+                return;
+            }
 
-                short opcode = instruction.OpCode.Value;
-                if (opcode != OpCodes.Call.Value && opcode != OpCodes.Callvirt.Value)
-                {
-                    continue;
-                }
+            int scanStart = Math.Max(0, bestiaryCallIndex - 180);
+            int scanEnd = Math.Min(instructions.Count - 1, bestiaryCallIndex + 240);
 
-                if (!instruction.Int32Operand.HasValue || instruction.Int32Operand.Value != setDefaultsToken)
+            for (int i = scanStart; i <= scanEnd; i++)
+            {
+                Instruction instruction = instructions[i];
+                if (!IsItemSetDefaultsCall(runtime, instruction))
                 {
                     continue;
                 }
 
                 int itemId;
-                if (!IlParser.TryFindClosestIntConstant(instructions, i, caseStart, out itemId))
+                if (!TryFindClosestIntConstant(instructions, i, scanStart, out itemId))
                 {
                     continue;
                 }
@@ -343,98 +347,6 @@ namespace StandaloneExtractor
             }
         }
 
-        private static bool TryResolveCaseRangeContainingBestiaryCall(
-            MethodInfo setupShopMethod,
-            List<IlInstruction> instructions,
-            out int caseStart,
-            out int caseEnd)
-        {
-            caseStart = 0;
-            caseEnd = 0;
-
-            MethodBody body = setupShopMethod.GetMethodBody();
-            if (body == null)
-            {
-                return false;
-            }
-
-            byte[] il = body.GetILAsByteArray();
-            if (il == null || il.Length == 0)
-            {
-                return false;
-            }
-
-            Type mainType = setupShopMethod.DeclaringType.Assembly.GetType("Terraria.Main", throwOnError: false);
-            if (mainType == null)
-            {
-                return false;
-            }
-
-            const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
-            MethodInfo bestiaryMethod = mainType.GetMethod("GetBestiaryProgressReport", Flags);
-            if (bestiaryMethod == null)
-            {
-                return false;
-            }
-
-            int bestiaryToken = bestiaryMethod.MetadataToken;
-            int callOffset;
-            if (!IlParser.TryFindMethodCallOffset(instructions, bestiaryToken, out callOffset))
-            {
-                return false;
-            }
-
-            if (IlParser.TryResolveCaseRangeByTypeComparison(instructions, il.Length, 23, callOffset, out caseStart, out caseEnd))
-            {
-                return true;
-            }
-
-            int switchInstructionIndex;
-            IlInstruction switchInstruction = IlParser.FindPrimarySwitchInstruction(instructions, out switchInstructionIndex);
-            if (switchInstruction == null)
-            {
-                return false;
-            }
-
-            int directCaseStart;
-            int directCaseEnd;
-            if (IlParser.TryResolveSwitchCaseRangeByTypeValue(instructions, switchInstructionIndex, switchInstruction, il.Length, 23, out directCaseStart, out directCaseEnd)
-                && callOffset >= directCaseStart
-                && callOffset < directCaseEnd)
-            {
-                caseStart = directCaseStart;
-                caseEnd = directCaseEnd;
-                return true;
-            }
-
-            int[] boundaries = switchInstruction.SwitchTargets
-                .Where(target => target >= 0 && target < il.Length)
-                .Distinct()
-                .OrderBy(target => target)
-                .ToArray();
-
-            if (boundaries.Length == 0)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < boundaries.Length; i++)
-            {
-                int start = boundaries[i];
-                int end = i + 1 < boundaries.Length ? boundaries[i + 1] : il.Length;
-                if (callOffset < start || callOffset >= end)
-                {
-                    continue;
-                }
-
-                caseStart = start;
-                caseEnd = end;
-                return true;
-            }
-
-            return false;
-        }
-
         private static void PopulateTravelShopByMethodConstants(TerrariaRuntime runtime, HashSet<int> destination)
         {
             const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
@@ -449,8 +361,20 @@ namespace StandaloneExtractor
 
             foreach (MethodInfo method in travelMethods)
             {
-                foreach (int value in IlParser.ExtractIntConstantsFromMethodBody(method))
+                MethodDefinition methodDefinition = ResolveMethodDefinition(runtime, method);
+                if (methodDefinition == null || !methodDefinition.HasBody)
                 {
+                    continue;
+                }
+
+                foreach (Instruction instruction in methodDefinition.Body.Instructions)
+                {
+                    int value;
+                    if (!TryGetLdcI4Value(instruction, out value))
+                    {
+                        continue;
+                    }
+
                     if (!IsLikelyTravelShopItemId(value, runtime.ItemIdCount))
                     {
                         continue;
@@ -458,6 +382,194 @@ namespace StandaloneExtractor
 
                     destination.Add(value);
                 }
+            }
+        }
+
+        private static MethodDefinition ResolveMethodDefinition(TerrariaRuntime runtime, MethodInfo method)
+        {
+            if (runtime == null || runtime.CecilModule == null || method == null)
+            {
+                return null;
+            }
+
+            MethodDefinition cached;
+            if (runtime.CecilMethodByToken.TryGetValue(method.MetadataToken, out cached))
+            {
+                return cached;
+            }
+
+            MethodDefinition resolved = null;
+            try
+            {
+                resolved = runtime.CecilModule.LookupToken(method.MetadataToken) as MethodDefinition;
+            }
+            catch
+            {
+            }
+
+            if (resolved != null)
+            {
+                runtime.CecilMethodByToken[method.MetadataToken] = resolved;
+            }
+
+            return resolved;
+        }
+
+        private static int FindInstructionIndex(IList<Instruction> instructions, Func<MethodReference, bool> predicate)
+        {
+            if (instructions == null || predicate == null)
+            {
+                return -1;
+            }
+
+            for (int i = 0; i < instructions.Count; i++)
+            {
+                Instruction instruction = instructions[i];
+                Code opcode = instruction.OpCode.Code;
+                if (opcode != Code.Call && opcode != Code.Callvirt)
+                {
+                    continue;
+                }
+
+                MethodReference reference = instruction.Operand as MethodReference;
+                if (predicate(reference))
+                {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static bool IsItemSetDefaultsCall(TerrariaRuntime runtime, Instruction instruction)
+        {
+            if (runtime == null || instruction == null)
+            {
+                return false;
+            }
+
+            Code opcode = instruction.OpCode.Code;
+            if (opcode != Code.Call && opcode != Code.Callvirt)
+            {
+                return false;
+            }
+
+            MethodReference reference = instruction.Operand as MethodReference;
+            if (reference == null)
+            {
+                return false;
+            }
+
+            if (!string.Equals(reference.Name, runtime.ItemSetDefaultsMethod.Name, StringComparison.Ordinal)
+                || !string.Equals(reference.DeclaringType.FullName, runtime.ItemType.FullName, StringComparison.Ordinal)
+                || reference.Parameters.Count != 1)
+            {
+                return false;
+            }
+
+            return string.Equals(reference.Parameters[0].ParameterType.FullName, "System.Int32", StringComparison.Ordinal);
+        }
+
+        private static bool IsBestiaryProgressCall(MethodReference reference)
+        {
+            if (reference == null)
+            {
+                return false;
+            }
+
+            return string.Equals(reference.DeclaringType.FullName, "Terraria.Main", StringComparison.Ordinal)
+                && string.Equals(reference.Name, "GetBestiaryProgressReport", StringComparison.Ordinal);
+        }
+
+        private static bool TryFindClosestIntConstant(
+            IList<Instruction> instructions,
+            int fromIndex,
+            int lowerBoundIndex,
+            out int value)
+        {
+            value = 0;
+            if (instructions == null || fromIndex <= 0)
+            {
+                return false;
+            }
+
+            int maxBacktrack = 12;
+            int minIndex = Math.Max(0, fromIndex - maxBacktrack);
+            for (int i = fromIndex - 1; i >= minIndex; i--)
+            {
+                if (i < lowerBoundIndex)
+                {
+                    break;
+                }
+
+                Instruction candidate = instructions[i];
+                if (TryGetLdcI4Value(candidate, out value))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryGetLdcI4Value(Instruction instruction, out int value)
+        {
+            value = 0;
+            if (instruction == null)
+            {
+                return false;
+            }
+
+            switch (instruction.OpCode.Code)
+            {
+                case Code.Ldc_I4_M1:
+                    value = -1;
+                    return true;
+                case Code.Ldc_I4_0:
+                    value = 0;
+                    return true;
+                case Code.Ldc_I4_1:
+                    value = 1;
+                    return true;
+                case Code.Ldc_I4_2:
+                    value = 2;
+                    return true;
+                case Code.Ldc_I4_3:
+                    value = 3;
+                    return true;
+                case Code.Ldc_I4_4:
+                    value = 4;
+                    return true;
+                case Code.Ldc_I4_5:
+                    value = 5;
+                    return true;
+                case Code.Ldc_I4_6:
+                    value = 6;
+                    return true;
+                case Code.Ldc_I4_7:
+                    value = 7;
+                    return true;
+                case Code.Ldc_I4_8:
+                    value = 8;
+                    return true;
+                case Code.Ldc_I4_S:
+                    if (instruction.Operand is sbyte sbyteValue)
+                    {
+                        value = sbyteValue;
+                        return true;
+                    }
+
+                    return false;
+                case Code.Ldc_I4:
+                    if (instruction.Operand is int intValue)
+                    {
+                        value = intValue;
+                        return true;
+                    }
+
+                    return false;
+                default:
+                    return false;
             }
         }
 
@@ -692,6 +804,7 @@ namespace StandaloneExtractor
 
             Func<int, string> getItemName = ItemNameResolver.Build(terrariaAssembly);
             Func<int, string> getNpcName = BuildNpcNameResolver(langType, npcIdType);
+            ModuleDefinition cecilModule = TryLoadCecilModule(terrariaAssembly);
 
             return new TerrariaRuntime
             {
@@ -708,8 +821,35 @@ namespace StandaloneExtractor
                 ItemSetDefaultsMethod = itemSetDefaultsMethod,
                 ItemIdCount = itemCountField == null ? 0 : Convert.ToInt32(itemCountField.GetValue(null), CultureInfo.InvariantCulture),
                 GetItemName = getItemName,
-                GetNpcName = getNpcName
+                GetNpcName = getNpcName,
+                CecilModule = cecilModule,
+                CecilMethodByToken = new Dictionary<int, MethodDefinition>()
             };
+        }
+
+        private static ModuleDefinition TryLoadCecilModule(Assembly terrariaAssembly)
+        {
+            if (terrariaAssembly == null)
+            {
+                return null;
+            }
+
+            string assemblyPath = terrariaAssembly.Location;
+            if (string.IsNullOrWhiteSpace(assemblyPath) || !File.Exists(assemblyPath))
+            {
+                Console.WriteLine("[npc-shops] Mono.Cecil fallback disabled; Terraria assembly location is unavailable.");
+                return null;
+            }
+
+            try
+            {
+                return ModuleDefinition.ReadModule(assemblyPath, new ReaderParameters { ReadSymbols = false });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("[npc-shops] Failed to open Terraria module with Mono.Cecil: " + ex.Message);
+                return null;
+            }
         }
 
         private static object CreateUnifiedRandomInstance(Type unifiedRandomType, int seed)
@@ -1166,7 +1306,7 @@ namespace StandaloneExtractor
             public bool UseZoologistILFallback;
         }
 
-        private sealed class TerrariaRuntime
+        private sealed class TerrariaRuntime : IDisposable
         {
             public Type ChestType;
             public MethodInfo SetupShopMethod;
@@ -1182,6 +1322,22 @@ namespace StandaloneExtractor
             public int ItemIdCount;
             public Func<int, string> GetItemName;
             public Func<int, string> GetNpcName;
+            public ModuleDefinition CecilModule;
+            public Dictionary<int, MethodDefinition> CecilMethodByToken;
+
+            public void Dispose()
+            {
+                if (CecilModule != null)
+                {
+                    CecilModule.Dispose();
+                    CecilModule = null;
+                }
+
+                if (CecilMethodByToken != null)
+                {
+                    CecilMethodByToken.Clear();
+                }
+            }
         }
     }
 }
